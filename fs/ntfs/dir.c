@@ -30,6 +30,16 @@
 #include "debug.h"
 #include "ntfs.h"
 
+#if (MP_NTFS_VOLUME_ID==1)
+/*Android kernel has used 0x12, so we use 0x13*/
+#define NTFS_IOCTL_GET_VOLUME_ID	_IOR('r', 0x13, __u32)
+#endif
+
+#if (MP_NTFS_VOLUME_LABEL==1)
+#define NTFS_VOLUME_NAME_LEN 256 // the max length of volume name is 256 bytes
+#define NTFS_IOCTL_GET_VOLUME_LABEL	_IOR('r', 0x14, __u32)
+#endif
+
 /**
  * The little endian Unicode string $I30 as a global constant.
  */
@@ -74,7 +84,7 @@ ntfschar I30[5] = { cpu_to_le16('$'), cpu_to_le16('I'),
  *	       locked whilst being accessed otherwise we may find a corrupt
  *	       page due to it being under ->writepage at the moment which
  *	       applies the mst protection fixups before writing out and then
- *	       removes them again after the write is complete after which it 
+ *	       removes them again after the write is complete after which it
  *	       unlocks the page.
  */
 MFT_REF ntfs_lookup_inode_by_name(ntfs_inode *dir_ni, const ntfschar *uname,
@@ -1093,7 +1103,7 @@ static inline int ntfs_filldir(ntfs_volume *vol,
  *	       locked whilst being accessed otherwise we may find a corrupt
  *	       page due to it being under ->writepage at the moment which
  *	       applies the mst protection fixups before writing out and then
- *	       removes them again after the write is complete after which it 
+ *	       removes them again after the write is complete after which it
  *	       unlocks the page.
  */
 static int ntfs_readdir(struct file *file, struct dir_context *actor)
@@ -1538,6 +1548,83 @@ static int ntfs_dir_fsync(struct file *filp, loff_t start, loff_t end,
 
 #endif /* NTFS_RW */
 
+#if (MP_NTFS_VOLUME_ID==1)
+static int ntfs_ioctl_volume_id(struct inode *dir, unsigned long arg)
+{
+	struct super_block *sb = dir->i_sb;
+	ntfs_volume *vol = NTFS_SB(sb);
+	return put_user(vol->serial_no, (u64 __user *)arg);
+}
+#endif
+
+#if (MP_NTFS_VOLUME_LABEL==1)
+static int ntfs_ioctl_volume_label(struct inode *dir, unsigned long arg)
+{
+	struct super_block *sb = dir->i_sb;
+	ntfs_volume *vol = NTFS_SB(sb);
+	char *label  = vol->vol_name;
+	char __user *userlabel = (char __user *)arg;
+	int len = strlen(vol->vol_name);
+	int ret = 0;
+
+	if(!label || !userlabel)
+		ret = -EFAULT;
+
+	if(len + 1 > NTFS_VOLUME_NAME_LEN)
+	{
+		len = NTFS_VOLUME_NAME_LEN - 1;
+		label[len] = '\0';
+	}
+
+	//APP must pay attention to the mem overwrite risk
+	if(copy_to_user(userlabel, label, len+1))
+		ret = -EFAULT;
+	return ret;
+}
+#endif
+
+#if (MP_NTFS_IOCTL==1)
+static long ntfs_ioctl (struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	char __user *v;
+	struct inode *inode;
+	if(filp == NULL)
+		return -EFAULT;
+	v = (char __user *)arg;
+	if(v == NULL)
+		return -EFAULT;
+
+	inode = filp->f_mapping->host;
+	switch(cmd){
+#if (MP_NTFS_VOLUME_LABEL==1)
+		case NTFS_IOCTL_GET_VOLUME_LABEL:
+			return ntfs_ioctl_volume_label(inode, arg);
+#endif
+#if (MP_NTFS_VOLUME_ID==1)
+		case NTFS_IOCTL_GET_VOLUME_ID:
+			return ntfs_ioctl_volume_id(inode,arg);
+#endif
+		default:
+			return -EFAULT;
+	}
+
+	return -EFAULT;
+}
+
+#if defined(CONFIG_COMPAT)
+static long compat_ntfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	if (!filp->f_op || !filp->f_op->unlocked_ioctl)
+		return -ENOTTY;
+
+	//for in ntfs,input parameter "arg" is about "char __user *",
+	//so here in compat_ioctl can use unlocked_ioctl directly.
+	return filp->f_op->unlocked_ioctl(filp, cmd, arg);
+}
+#endif
+
+#endif
+
 const struct file_operations ntfs_dir_ops = {
 	.llseek		= generic_file_llseek,	/* Seek inside directory. */
 	.read		= generic_read_dir,	/* Return -EISDIR. */
@@ -1545,7 +1632,14 @@ const struct file_operations ntfs_dir_ops = {
 #ifdef NTFS_RW
 	.fsync		= ntfs_dir_fsync,	/* Sync a directory to disk. */
 #endif /* NTFS_RW */
-	/*.ioctl	= ,*/			/* Perform function on the
-						   mounted filesystem. */
+	/*.ioctl	= ,*/			  /* Perform function on the mounted filesystem. */
+
+#if (MP_NTFS_IOCTL==1)
+	.unlocked_ioctl = ntfs_ioctl, /* Perform function on the mounted filesystem. */
+#if defined(CONFIG_COMPAT)
+	.compat_ioctl = compat_ntfs_ioctl,
+#endif
+#endif
+
 	.open		= ntfs_dir_open,	/* Open directory. */
 };

@@ -1012,19 +1012,19 @@ EXPORT_SYMBOL(mmc_start_bkops);
  */
 int mmc_flush_cache(struct mmc_card *card)
 {
-	int err = 0;
+    int err = 0;
 
-	if (mmc_card_mmc(card) &&
-			(card->ext_csd.cache_size > 0) &&
-			(card->ext_csd.cache_ctrl & 1)) {
-		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
-				EXT_CSD_FLUSH_CACHE, 1, 0);
-		if (err)
-			pr_err("%s: cache flush error %d\n",
-					mmc_hostname(card->host), err);
-	}
+    if (mmc_card_mmc(card) &&
+            (card->ext_csd.cache_size > 0) &&
+            (card->ext_csd.cache_ctrl & 1)) {
+        err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+                EXT_CSD_FLUSH_CACHE, 1, 0);
+        if (err)
+            pr_err("%s: cache flush error %d\n",
+                    mmc_hostname(card->host), err);
+    }
 
-	return err;
+    return err;
 }
 EXPORT_SYMBOL(mmc_flush_cache);
 

@@ -87,6 +87,24 @@ config MTD_UBI_GLUEBI
 	   work on top of UBI. Do not enable this unless you use legacy
 	   software.
 
+config MTD_UBI_DELAY_INIT
+    bool "UBI delayed init"
+    default y
+
+config MTD_UBI_BACKUP_LSB
+    bool "ENABLE UBI BACKUP LSB PAGE"
+    default y
+    depends on MSTAR_NAND && MP_NAND_UBI
+    help
+       This option enables backup LSB pages while writing MSB pages on MLC NAND
+
+config MTD_UBI_BITFLIPS
+    bool "ENABLE UBI BITFLIPS"
+    default y
+    depends on (MSTAR_NAND || MSTAR_SPI_NAND) && MP_NAND_UBI
+    help
+       This option enables backup LSB pages while writing MSB pages on MLC NAND
+
 config MTD_UBI_BLOCK
 	bool "Read-only block devices on top of UBI volumes"
 	default n

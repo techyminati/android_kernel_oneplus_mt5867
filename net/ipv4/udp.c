@@ -116,6 +116,10 @@
 #include <net/sock_reuseport.h>
 #include <net/addrconf.h>
 
+#if  defined(CONFIG_NOE_NAT_HW)
+#include "../../drivers/mstar2/drv/noe/nat/hw_nat/mdrv_hwnat.h"
+#endif
+
 struct udp_table udp_table __read_mostly;
 EXPORT_SYMBOL(udp_table);
 
@@ -2421,6 +2425,21 @@ int udp_v4_early_demux(struct sk_buff *skb)
 
 int udp_rcv(struct sk_buff *skb)
 {
+#if  defined(CONFIG_NOE_NAT_HW)
+        if((FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_PCI) ||
+           (FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_WLAN) ||
+           (FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_GE)){
+           if(IS_SPACE_AVAILABLED_HEAD(skb))
+                FOE_MAGIC_TAG_HEAD(skb) = 0;
+        }
+        if((FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_PCI) ||
+           (FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_WLAN) ||
+           (FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_GE)){
+           if(IS_SPACE_AVAILABLED_TAIL(skb))
+                FOE_MAGIC_TAG_TAIL(skb) = 0;
+        }
+#endif
+
 	return __udp4_lib_rcv(skb, &udp_table, IPPROTO_UDP);
 }
 

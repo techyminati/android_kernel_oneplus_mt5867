@@ -35,6 +35,52 @@
 #include <linux/wakeup_reason.h>
 
 #include "power.h"
+#ifdef CONFIG_MP_CMA_PATCH_MBOOT_STR_USE_CMA
+#include <mdrv_miu.h>
+#include <mdrv_cma_pool.h>
+#endif
+
+#if defined(CONFIG_MSTAR_PM)
+#include <mdrv_pm.h>
+#endif
+
+
+#ifdef CONFIG_MP_R2_STR_ENABLE
+#include "../../drivers/mstar2/include/mdrv_types.h"
+#include "../../drivers/mstar2/include/mdrv_mstypes.h"
+#include "../../drivers/mstar2/drv/mbx/mdrv_mbx.h"
+#include "../../drivers/mstar2/drv/mbx/mapi_mbx.h"
+extern unsigned long get_str_handshake_addr(void);
+#endif
+
+#if defined(CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND) || \
+	defined(CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE) || \
+	defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL)
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+extern atomic_t ac_str_cpufreq;
+extern void change_cpus_timer(char *caller, unsigned int target_freq, unsigned int cpu_id);
+extern atomic_t disable_dvfs;
+extern void Mdrv_CpuFreq_All_Lock(char *caller);
+extern void Mdrv_CpuFreq_All_UnLock(char *caller);
+#endif
+#endif
+
+#if (MP_USB_STR_PATCH==1)
+typedef enum
+{
+	E_STR_NONE,
+	E_STR_IN_SUSPEND,
+	E_STR_IN_RESUME
+} EN_STR_STATUS;
+
+static EN_STR_STATUS enStrStatus = E_STR_NONE;
+
+bool is_suspending(void)
+{
+	return (enStrStatus == E_STR_IN_SUSPEND);
+}
+EXPORT_SYMBOL_GPL(is_suspending);
+#endif
 
 const char * const pm_labels[] = {
 	[PM_SUSPEND_TO_IDLE] = "freeze",
@@ -302,6 +348,23 @@ static int platform_suspend_begin(suspend_state_t state)
 		return 0;
 }
 
+#ifdef CONFIG_MP_R2_STR_ENABLE
+u32 kernel_read_phys(u64 phys_addr)
+{
+	u32 phys_addr_page = phys_addr & 0xFFFFE000;
+	u32 phys_offset    = phys_addr & 0x00001FFF;
+	u32 map_size       = phys_offset + sizeof(u32);
+	u32 ret = 0xDEADBEEF;
+	void *mem_mapped = ioremap_nocache(phys_addr_page, map_size);
+	if (NULL != mem_mapped) {
+		ret = (u32)ioread32(((u8*)mem_mapped) + phys_offset);
+		iounmap(mem_mapped);
+	}
+
+	return ret;
+}
+#endif
+
 static void platform_resume_end(suspend_state_t state)
 {
 	if (state == PM_SUSPEND_TO_IDLE && s2idle_ops && s2idle_ops->end)
@@ -364,18 +427,61 @@ static int suspend_prepare(suspend_state_t state)
 		goto Finish;
 	}
 
+#if defined(CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND) || \
+	defined(CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE) || \
+	defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL)
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	int i = 0;
+	/* Disable DVFS before suspend */
+	Mdrv_CpuFreq_All_Lock((char *)__func__);
+	atomic_set(&disable_dvfs, 1);
+	pr_info("%s(%d): Disable DVFS\n", __func__, __LINE__);
+	Mdrv_CpuFreq_All_UnLock((char *)__func__);
+
+	/* Reset cpufreq and voltage to default setting */
+	pr_info("%s(%d): setting cpufreq\n", __func__, __LINE__);
+	for (i = 0; i < CONFIG_NR_CPUS; i ++)
+		change_cpus_timer((char *)__func__, 54472, i);
+
+	mdelay(100);
+#endif
+#endif
+
 	trace_suspend_resume(TPS("freeze_processes"), 0, true);
 	error = suspend_freeze_processes();
 	trace_suspend_resume(TPS("freeze_processes"), 0, false);
-	if (!error)
+	if (!error) {
+#ifdef CONFIG_MP_CMA_PATCH_MBOOT_STR_USE_CMA
+		/* allocate all freed cma_memory from a mboot co-buffer cma_region,
+		 * to prevent the kernel data is still @ the mboot co-buffer cma_region,
+		 * and thus, the kernel data will be corrupted by mboot
+		 */
+#ifdef CONFIG_MSTAR_CMAPOOL
+		str_reserve_mboot_cma_buffer();
+#endif
+#endif
 		return 0;
+	}
 
 	log_suspend_abort_reason("One or more tasks refusing to freeze");
 	suspend_stats.failed_freeze++;
 	dpm_save_failed_step(SUSPEND_FREEZE);
  Finish:
 	__pm_notifier_call_chain(PM_POST_SUSPEND, nr_calls, NULL);
+
+#if defined(CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND) || \
+	defined(CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE) || \
+	defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL)
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	/* Enable DVFS after resume, this is error case */
+	Mdrv_CpuFreq_All_Lock((char *)__func__);
+	atomic_set(&disable_dvfs, 0);
+	pr_info("%s(%d): Enabled DVFS in STR (Error case)\n", __func__, __LINE__);
+	Mdrv_CpuFreq_All_UnLock((char *)__func__);
+#endif
+#endif
 	pm_restore_console();
+
 	return error;
 }
 
@@ -403,21 +509,34 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 	int error, last_dev;
 
 	error = platform_suspend_prepare(state);
-	if (error)
+	if (error) {
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
 		goto Platform_finish;
+	}
 
 	error = dpm_suspend_late(PMSG_SUSPEND);
 	if (error) {
 		last_dev = suspend_stats.last_failed_dev + REC_FAILED_NUM - 1;
 		last_dev %= REC_FAILED_NUM;
 		pr_err("late suspend of devices failed\n");
+
 		log_suspend_abort_reason("late suspend of %s device failed",
 					 suspend_stats.failed_devs[last_dev]);
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
 		goto Platform_finish;
 	}
+
 	error = platform_suspend_prepare_late(state);
-	if (error)
+	if (error) {
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
 		goto Devices_early_resume;
+	}
 
 	if (state == PM_SUSPEND_TO_IDLE && pm_test_level != TEST_PLATFORM) {
 		s2idle_loop();
@@ -431,18 +550,33 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 		pr_err("noirq suspend of devices failed\n");
 		log_suspend_abort_reason("noirq suspend of %s device failed",
 					 suspend_stats.failed_devs[last_dev]);
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
 		goto Platform_early_resume;
 	}
-	error = platform_suspend_prepare_noirq(state);
-	if (error)
-		goto Platform_wake;
 
-	if (suspend_test(TEST_PLATFORM))
+	error = platform_suspend_prepare_noirq(state);
+	if (error) {
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
 		goto Platform_wake;
+	}
+
+	if (suspend_test(TEST_PLATFORM)) {
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
+		goto Platform_wake;
+	}
 
 	error = disable_nonboot_cpus();
 	if (error || suspend_test(TEST_CPUS)) {
 		log_suspend_abort_reason("Disabling non-boot cpus failed");
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
 		goto Enable_cpus;
 	}
 
@@ -453,6 +587,11 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 
 	error = syscore_suspend();
 	if (!error) {
+#ifdef CONFIG_MP_MSTAR_STR_BASE
+        if (is_mstar_str()) {
+		*wakeup = false;
+        } else
+#endif
 		*wakeup = pm_wakeup_pending();
 		if (!(suspend_test(TEST_CORE) || *wakeup)) {
 			trace_suspend_resume(TPS("machine_suspend"),
@@ -460,10 +599,23 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 			error = suspend_ops->enter(state);
 			trace_suspend_resume(TPS("machine_suspend"),
 				state, false);
+#ifdef CONFIG_MSTAR_CHIP
+			add_timestamp("machine_suspend end");
+#endif
+#ifdef CONFIG_MP_MSTAR_STR_BASE
+			set_state_value(STENT_RESUME_FROM_SUSPEND);
+#endif
 		} else if (*wakeup) {
 			error = -EBUSY;
 		}
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
 		syscore_resume();
+	} else {
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
 	}
 
 	system_state = SYSTEM_RUNNING;
@@ -472,7 +624,13 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 	BUG_ON(irqs_disabled());
 
  Enable_cpus:
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("enable_nonboot_cpus begin");
+#endif
 	enable_nonboot_cpus();
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("enable_nonboot_cpus end");
+#endif
 
  Platform_wake:
 	platform_resume_noirq(state);
@@ -504,8 +662,12 @@ int suspend_devices_and_enter(suspend_state_t state)
 	pm_suspend_target_state = state;
 
 	error = platform_suspend_begin(state);
-	if (error)
+	if (error) {
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
 		goto Close;
+	}
 
 	suspend_console();
 	suspend_test_start();
@@ -514,11 +676,18 @@ int suspend_devices_and_enter(suspend_state_t state)
 		pr_err("Some devices failed to suspend, or early wake event detected\n");
 		log_suspend_abort_reason(
 				"Some devices failed to suspend, or early wake event detected");
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
 		goto Recover_platform;
 	}
 	suspend_test_finish("suspend devices");
-	if (suspend_test(TEST_DEVICES))
+	if (suspend_test(TEST_DEVICES)) {
+#if (MP_USB_STR_PATCH==1)
+		enStrStatus = E_STR_IN_RESUME;
+#endif
 		goto Recover_platform;
+	}
 
 	do {
 		error = suspend_enter(state, &wakeup);
@@ -529,7 +698,13 @@ int suspend_devices_and_enter(suspend_state_t state)
 	dpm_resume_end(PMSG_RESUME);
 	suspend_test_finish("resume devices");
 	trace_suspend_resume(TPS("resume_console"), state, true);
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("resume_console begin");
+#endif
 	resume_console();
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("resume_console end");
+#endif
 	trace_suspend_resume(TPS("resume_console"), state, false);
 
  Close:
@@ -550,10 +725,59 @@ int suspend_devices_and_enter(suspend_state_t state)
  */
 static void suspend_finish(void)
 {
+#if defined(CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND) || \
+	defined(CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE) || \
+	defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL)
+#if (defined CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	/* Enable DVFS after resume, this is error case */
+	Mdrv_CpuFreq_All_Lock((char *)__func__);
+	atomic_set(&disable_dvfs, 0);
+	pr_info("%s(%d): Enabled DVFS in STR\n", __func__, __LINE__);
+	Mdrv_CpuFreq_All_UnLock((char *)__func__);
+#endif
+#endif
+
+#ifdef CONFIG_MP_CMA_PATCH_MBOOT_STR_USE_CMA
+	/* free all pre-allocated cma_memory from a mboot co-buffer cma_region */
+#ifdef CONFIG_MSTAR_CMAPOOL
+	str_release_mboot_cma_buffer();
+#endif
+#endif
 	suspend_thaw_processes();
 	pm_notifier_call_chain(PM_POST_SUSPEND);
 	pm_restore_console();
 }
+
+#ifdef CONFIG_MP_R2_STR_ENABLE
+#define MIU0_BASE               0x20000000
+#define STR_FLAG_SUSPEND_FINISH 0xFFFF8888
+static void _nuttx_str_notify(void)
+{
+	volatile unsigned long u64TEESTRBOOTFLAG = get_str_handshake_addr();
+
+	if (u64TEESTRBOOTFLAG != 0) {
+		pr_info("%s(%d): TEE mode: Nuttx\n", __func__, __LINE__);
+		pr_info("PM: Send MBX to TEE for STR_Suspend  ... \n");
+		//1. Setup Suspend Flag to 0
+		pr_info("PM: u64TEESTRBOOTFLAG => Addr = 0x%x  !!!!\n",
+				u64TEESTRBOOTFLAG);
+		pr_info("PM: u64TEESTRBOOTFLAG => Value = 0x%x !!!!\n",
+				kernel_read_phys(u64TEESTRBOOTFLAG));
+		//2. Send Mailbox to TEE (PA!!!)
+		MApi_MBX_NotifyTeetoSuspend(u64TEESTRBOOTFLAG - MIU0_BASE);
+
+		//3. Waiting TEE to finish susepnd jobs
+		while (kernel_read_phys(u64TEESTRBOOTFLAG) !=
+			STR_FLAG_SUSPEND_FINISH) {
+			mdelay(400);
+			pr_info("PM: Waiting TEE suspend done signal!!! 0x%x\n",
+				kernel_read_phys(u64TEESTRBOOTFLAG));
+		}
+	} else {
+		pr_info("%s(%d): Normal STR flow\n", __func__, __LINE__);
+	}
+}
+#endif
 
 /**
  * enter_state - Do common work needed to enter system sleep state.
@@ -566,6 +790,9 @@ static void suspend_finish(void)
 static int enter_state(suspend_state_t state)
 {
 	int error;
+#ifdef CONFIG_MP_MSTAR_STR_BASE
+	int bresumefromsuspend = 0;
+#endif
 
 	trace_suspend_resume(TPS("suspend_enter"), state, true);
 	if (state == PM_SUSPEND_TO_IDLE) {
@@ -584,6 +811,13 @@ static int enter_state(suspend_state_t state)
 	if (state == PM_SUSPEND_TO_IDLE)
 		s2idle_begin();
 
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+	set_state_entering();
+#if defined(CONFIG_MP_USB_STR_PATCH)
+	enStrStatus = E_STR_IN_SUSPEND;
+#endif
+try_again:
+#endif
 #ifndef CONFIG_SUSPEND_SKIP_SYNC
 	trace_suspend_resume(TPS("sync_filesystems"), 0, true);
 	pr_info("Syncing filesystems ... ");
@@ -598,6 +832,10 @@ static int enter_state(suspend_state_t state)
 	if (error)
 		goto Unlock;
 
+#ifdef CONFIG_MP_R2_STR_ENABLE
+	if (TEEINFO_TYPTE == SECURITY_TEEINFO_OSTYPE_NUTTX)
+		_nuttx_str_notify();
+#endif
 	if (suspend_test(TEST_FREEZER))
 		goto Finish;
 
@@ -610,9 +848,32 @@ static int enter_state(suspend_state_t state)
  Finish:
 	events_check_enabled = false;
 	pm_pr_dbg("Finishing wakeup.\n");
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+	if(STENT_RESUME_FROM_SUSPEND == get_state_value()) {
+		clear_state_entering();
+		bresumefromsuspend=1;
+	}
+#endif
 	suspend_finish();
  Unlock:
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+#if defined(CONFIG_MSTAR_STR_ACOFF_ON_ERR)
+	if(error) {
+		extern void mstar_str_notifypmerror_off(void);
+		mstar_str_notifypmerror_off(); //it won't return, wait pm to power off
+	}
+#endif
+
+	if (is_mstar_str() && bresumefromsuspend == 0) {
+		schedule_timeout_interruptible(HZ);
+		goto try_again;
+	}
+#if (MP_USB_STR_PATCH==1)
+	enStrStatus = E_STR_NONE;
+#endif
+#endif
 	mutex_unlock(&system_transition_mutex);
+
 	return error;
 }
 

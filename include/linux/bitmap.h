@@ -172,6 +172,20 @@ bitmap_find_next_zero_area(unsigned long *map,
 					      align_mask, 0);
 }
 
+#ifdef CONFIG_MP_MMA_ENABLE
+extern unsigned long bitmap_find_next_zero_area_from_high_to_low(unsigned long *map,
+					 unsigned long size,
+					 unsigned long start,
+					 unsigned int nr,
+					 unsigned long align_mask);
+
+extern unsigned long find_next_zero_bit_from_high_to_low(const unsigned long *addr, unsigned long size,
+				 unsigned long offset);
+
+extern unsigned long find_next_bit_from_high_to_low(const unsigned long *addr, unsigned long size,
+			    unsigned long offset);
+#endif
+
 extern int __bitmap_parse(const char *buf, unsigned int buflen, int is_user,
 			unsigned long *dst, int nbits);
 extern int bitmap_parse_user(const char __user *ubuf, unsigned int ulen,

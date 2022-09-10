@@ -32,6 +32,12 @@ static const char * const backends[] = {
 #if IS_ENABLED(CONFIG_CRYPTO_ZSTD)
 	"zstd",
 #endif
+#if IS_ENABLED(CONFIG_MP_MZCCMDQ_HW)
+	"mzc",
+#endif
+#if IS_ENABLED(CONFIG_MP_MZCCMDQ_HYBRID_HW)
+	"mzc_hybrid",
+#endif
 	NULL
 };
 

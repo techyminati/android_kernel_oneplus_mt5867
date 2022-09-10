@@ -20,6 +20,9 @@
 #include <linux/tee_drv.h>
 #include "optee_private.h"
 #include "optee_smc.h"
+#ifdef CONFIG_MSTAR_CHIP
+#define TEE_THREAD_RPC_MAX_NUM_PARAMS       4  // Sync from optee_os/thread.h
+#endif
 
 struct wq_entry {
 	struct list_head link;
@@ -370,7 +373,9 @@ static void handle_rpc_func_cmd(struct tee_context *ctx, struct optee *optee,
 
 	arg = tee_shm_get_va(shm, 0);
 	if (IS_ERR(arg)) {
-		pr_err("%s: tee_shm_get_va %p failed\n", __func__, shm);
+		pr_err("%s %s(%u) tee_shm_get_va %p failed\n",
+			__func__, current->comm,
+			current->pid, shm);
 		return;
 	}
 
@@ -414,7 +419,15 @@ void optee_handle_rpc(struct tee_context *ctx, struct optee_rpc_param *param,
 
 	switch (OPTEE_SMC_RETURN_GET_RPC_FUNC(param->a0)) {
 	case OPTEE_SMC_RPC_FUNC_ALLOC:
+#ifdef CONFIG_MSTAR_CHIP
+		if (OPTEE_MSG_GET_ARG_SIZE(TEE_THREAD_RPC_MAX_NUM_PARAMS) == param->a1)
+			shm = tee_shm_alloc(ctx, param->a1,
+				TEE_SHM_MAPPED | TEE_SHM_PREALLOC);
+		else
+			shm = tee_shm_alloc(ctx, param->a1, TEE_SHM_MAPPED);
+#else
 		shm = tee_shm_alloc(ctx, param->a1, TEE_SHM_MAPPED);
+#endif
 		if (!IS_ERR(shm) && !tee_shm_get_pa(shm, 0, &pa)) {
 			reg_pair_from_64(&param->a1, &param->a2, pa);
 			reg_pair_from_64(&param->a4, &param->a5,
@@ -443,7 +456,8 @@ void optee_handle_rpc(struct tee_context *ctx, struct optee_rpc_param *param,
 		handle_rpc_func_cmd(ctx, optee, shm, call_ctx);
 		break;
 	default:
-		pr_warn("Unknown RPC func 0x%x\n",
+		pr_warn("%s %s(%u) Unknown RPC func 0x%x\n",
+			__func__, current->comm, current->pid,
 			(u32)OPTEE_SMC_RETURN_GET_RPC_FUNC(param->a0));
 		break;
 	}

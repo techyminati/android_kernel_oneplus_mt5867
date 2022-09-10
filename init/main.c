@@ -92,6 +92,7 @@
 #include <linux/rodata_test.h>
 #include <linux/jump_label.h>
 #include <linux/mem_encrypt.h>
+#include <mach/io.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -101,12 +102,34 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/initcall.h>
+#include <mstar/mpatch_macro.h>
+#if defined(CONFIG_ARM64)
+extern unsigned long __must_check __copy_in_user(void __user *to, const void __user *from, unsigned long n);
+#endif
+
+#if (MP_CACHE_DROP==1)
+#include <linux/sched.h>
+#endif
 
 static int kernel_init(void *);
 
 extern void init_IRQ(void);
 extern void radix_tree_init(void);
+extern void __memblock_dump_all(void);
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+extern void show_mm_time(unsigned long time);
+#endif
 
+#if (MP_PLATFORM_ARM == 1)
+#if (MP_PLATFORM_INT_1_to_1_SPI != 1)
+extern int __init init_irq_fiq_merge(void);
+#endif/*MP_PLATFORM_INT_1_to_1_SPI*/
+extern void __init serial_init(void);
+#endif /* MP_PLATFORM_ARM */
+
+#ifdef CONFIG_MP_CHECKPT_BOOT
+extern int Mstar_Timer1_GetMs(void);
+#endif
 /*
  * Debug helper: via this flag we know that we are in 'early bootup code'
  * where only the boot processor is running with IRQ disabled.  This means
@@ -393,11 +416,28 @@ static void __init setup_command_line(char *command_line)
  */
 
 static __initdata DECLARE_COMPLETION(kthreadd_done);
+#if !defined(CONFIG_MP_PURE_SN_32BIT) && !defined(CONFIG_MSTAR_ARM_BD_FPGA)
+DECLARE_COMPLETION(mmc_done);
+#endif
+
+#ifdef CONFIG_MP_PLATFORM_PHY_ADDRESS_MORE_THAN_2G_SET_MOVABLE_DEBUG
+extern void testAddrTranslation(void);
+#endif
 
 static noinline void __ref rest_init(void)
 {
 	struct task_struct *tsk;
 	int pid;
+#if (MP_CACHE_DROP==1)
+	int pid_kthre_drop_cache;
+	struct sched_param para;
+	struct task_struct *p;
+	int srch_retval;
+#endif
+
+#ifdef CONFIG_MP_PLATFORM_PHY_ADDRESS_MORE_THAN_2G_SET_MOVABLE_DEBUG
+        testAddrTranslation();
+#endif
 
 	rcu_scheduler_starting();
 	/*
@@ -418,6 +458,22 @@ static noinline void __ref rest_init(void)
 
 	numa_default_policy();
 	pid = kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES);
+
+#if (MP_CACHE_DROP==1)
+	pid_kthre_drop_cache=kernel_thread(kthre_drop_cache, NULL, CLONE_FS | CLONE_FILES);
+	rcu_read_lock();
+	srch_retval = -ESRCH;
+	p = pid_kthre_drop_cache ? find_task_by_vpid(pid_kthre_drop_cache) : current;
+	if (p != NULL)
+	{
+		srch_retval = (p->policy == SCHED_FIFO || p->policy == SCHED_RR)?1:0;
+		para.sched_priority=srch_retval;
+		//use default and set min
+		srch_retval = sched_setscheduler(p, p->policy, &para);
+	}
+	rcu_read_unlock();
+#endif
+
 	rcu_read_lock();
 	kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns);
 	rcu_read_unlock();
@@ -533,6 +589,21 @@ static void __init report_meminit(void)
 /*
  * Set up kernel memory allocators
  */
+ptrdiff_t mstar_pm_base;
+EXPORT_SYMBOL(mstar_pm_base);
+extern phys_addr_t linux_memory_address;
+extern phys_addr_t linux_memory_length;
+extern unsigned long lx_mem_addr;
+extern unsigned long lx_mem_size;
+#ifdef CONFIG_MP_PLATFORM_FRC_MAPPING
+/* add a FRE_BASE mapping, this is from 0x1f800000, currently use 2MB size */
+ptrdiff_t mstar_frc_base;
+EXPORT_SYMBOL(mstar_frc_base);
+#endif
+#ifdef CONFIG_MP_PLATFORM_XC_EXT_MAPPING
+ptrdiff_t mstar_xc_ext_base;
+EXPORT_SYMBOL(mstar_xc_ext_base);
+#endif
 static void __init mm_init(void)
 {
 	/*
@@ -550,8 +621,50 @@ static void __init mm_init(void)
 	init_espfix_bsp();
 	/* Should be run after espfix64 is set up. */
 	pti_init();
+
+	/*
+	* Mapping mstar peripheral register.
+	*/
+	mstar_pm_base =  (sizeof(unsigned long) == 8) ? (ptrdiff_t)ioremap(IO_PHYS, 0xA00000) : IO_VIRT;
+
+#ifdef CONFIG_MP_PLATFORM_FRC_MAPPING
+	/*
+     * Mapping mstar FRC register.
+     */
+	mstar_frc_base = (ptrdiff_t)ioremap(IO_FRC_PHYS, IO_FRC_SIZE);
+#endif
+#ifdef CONFIG_MP_PLATFORM_XC_EXT_MAPPING
+	/*
+	 * Mapping mstar XC_EXT register (Bank: 0x3XXX).
+	 */
+	mstar_xc_ext_base = (ptrdiff_t)ioremap(IO_XC_EXT_PHYS, IO_XC_EXT_SIZE);
+	pr_info("mstar_xc_ext_base is 0x%lx\n", (unsigned long)mstar_xc_ext_base);
+#endif
 }
 
+/* extern by "check_points.c" for "performance index" */
+#ifdef CONFIG_MP_CHECKPT_BOOT
+unsigned int kr_PiuTime = 0;
+#endif
+
+#if (MP_PLATFORM_ARM_64bit_PORTING == 1 || MP_PLATFORM_ARM_32bit_PORTING == 1)
+unsigned long __initdata __ramdisk_start, __initdata __ramdisk_len ;
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 1)
+unsigned long __cmdline;
+void __init mstar_get_ramdisk_info(unsigned long start,unsigned long len, unsigned long cmdline)
+#else
+void __init mstar_get_ramdisk_info(unsigned long start,unsigned long len)
+#endif
+{
+   __ramdisk_start = start;
+   __ramdisk_len = len;
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 1)
+   __cmdline = cmdline;
+#endif
+}
+#endif
+
+extern void early_putstr(const char *fmt, ...);
 asmlinkage __visible void __init start_kernel(void)
 {
 	char *command_line;
@@ -573,6 +686,7 @@ asmlinkage __visible void __init start_kernel(void)
 	boot_cpu_init();
 	page_address_init();
 	pr_notice("%s", linux_banner);
+	//early_putstr("the PUD_SIZE :0x%lx VMEMMAP_SIZE:0x%lx ",PUD_SIZE,VMEMMAP_SIZE);
 	setup_arch(&command_line);
 	mm_init_cpumask(&init_mm);
 	setup_command_line(command_line);
@@ -675,6 +789,11 @@ asmlinkage __visible void __init start_kernel(void)
 	time_init();
 	printk_safe_init();
 	perf_event_init();
+#ifdef CONFIG_MP_CHECKPT_BOOT
+	/* checkpoint for autotest boottime, plz dont remove it */
+	kr_PiuTime = Mstar_Timer1_GetMs();
+	printk(KERN_ALERT "[AT][KR][reset timer][%u]\n", kr_PiuTime);
+#endif
 	profile_init();
 	call_function_init();
 	WARN(!irqs_disabled(), "Interrupts were enabled early\n");
@@ -683,6 +802,9 @@ asmlinkage __visible void __init start_kernel(void)
 	local_irq_enable();
 
 	kmem_cache_init_late();
+#ifdef CONFIG_MP_PLATFORM_ARM
+	serial_init();
+#endif /* MP_PLATFORM_ARM */
 
 	/*
 	 * HACK ALERT! This is early. We're enabling the console before
@@ -690,6 +812,7 @@ asmlinkage __visible void __init start_kernel(void)
 	 * this. But we do want output early, in case something goes wrong.
 	 */
 	console_init();
+	/*console has already inited, so we could use standard uart output. Then unmap the previous one*/
 	if (panic_later)
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
@@ -1088,6 +1211,10 @@ static inline void mark_readonly(void)
 
 static int __ref kernel_init(void *unused)
 {
+#ifdef CONFIG_MP_CHECKPT_BOOT
+	unsigned int PiuTick;
+	unsigned int PiuTime;
+#endif
 	int ret;
 
 	kernel_init_freeable();
@@ -1095,7 +1222,9 @@ static int __ref kernel_init(void *unused)
 	async_synchronize_full();
 	ftrace_free_init_mem();
 	jump_label_invalidate_initmem();
+#if defined(CONFIG_MSTAR_CHIP) && !defined(CONFIG_ARM64)
 	free_initmem();
+#endif
 	mark_readonly();
 
 	/*
@@ -1109,6 +1238,45 @@ static int __ref kernel_init(void *unused)
 
 	rcu_end_inkernel_boot();
 
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+	show_mm_time(0);
+#endif
+
+#ifdef CONFIG_MP_PLATFORM_ARM
+#ifdef CONFIG_ARCH_SPARSEMEM_ENABLE
+#ifdef CONFIG_MP_SPARSE_MEM_ENABLE_HOLES_IN_ZONE_CHECK
+#if !defined(CONFIG_HOLES_IN_ZONE) && !defined(CONFIG_ARM64)
+	//printk("\033[31m[Error]Function = %s, Line = %d, while using ARM chips and SPARSE_MEMORY, you need to enable CONFIG_HOLES_IN_ZONE\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+	//printk("\033[31m[Error]Function = %s, Line = %d, while using ARM chips and SPARSE_MEMORY, you need to enable CONFIG_HOLES_IN_ZONE\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+	//printk("\033[31m[Error]Function = %s, Line = %d, while using ARM chips and SPARSE_MEMORY, you need to enable CONFIG_HOLES_IN_ZONE\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+#endif
+#endif
+#endif
+#endif
+
+#ifdef CONFIG_MP_CHECKPT_BOOT
+	/* checkpoint for autotest boottime, plz dont remove it */
+#if (MP_PLATFORM_ARM == 1 && MP_PLATFORM_MIPS == 1)
+#error "Error, both CONFIG_MP_PLATFORM_ARM and CONFIG_MP_PLATFORM_MIPS are set, please select only one"
+#endif
+
+#if !defined(CONFIG_MP_PURE_SN_32BIT) && !defined(CONFIG_MSTAR_ARM_BD_FPGA)
+	pr_alert("Waiting for MMC done ...\n");
+	if (!wait_for_completion_timeout(&mmc_done, 5 * HZ))
+		pr_warn("MMC register disk fail !!\n");
+#endif
+
+#ifdef CONFIG_MP_PLATFORM_ARM
+	PiuTick = reg_readw(0x1f006090UL);
+	PiuTick += (reg_readw(0x1f006094UL) << 16);
+#else
+	PiuTick = *(volatile unsigned short *)(0xbf006090);
+	PiuTick += (*(volatile unsigned short *)(0xbf006094)) << 16;
+#endif
+	PiuTime = PiuTick / 12000;
+	pr_alert("[AT][KR][start init][%u]\n", PiuTime);
+	pr_alert("[AutoTest][Kernel][start Initprocess][%u]\n", PiuTime);
+#endif
 	if (ramdisk_execute_command) {
 		ret = run_init_process(ramdisk_execute_command);
 		if (!ret)
@@ -1188,6 +1356,11 @@ static noinline void __init kernel_init_freeable(void)
 
 	if (!ramdisk_execute_command)
 		ramdisk_execute_command = "/init";
+
+#if !defined(CONFIG_MP_PURE_SN_32BIT) && !defined(CONFIG_MSTAR_ARM_BD_FPGA)
+	if (!wait_for_completion_timeout(&mmc_done, 5 * HZ))
+		pr_err("MMC register disk fail !!\n");
+#endif
 
 	if (ksys_access((const char __user *)
 			ramdisk_execute_command, 0) != 0) {

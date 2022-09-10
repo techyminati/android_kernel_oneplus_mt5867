@@ -18,6 +18,7 @@
 #include <asm/ptrace.h>
 #include <asm/irq.h>
 #include <asm/sections.h>
+#include <mstar/mpatch_macro.h>
 
 /*
  * These correspond to the IORESOURCE_IRQ_* defines in
@@ -74,6 +75,10 @@
 #define IRQF_NO_THREAD		0x00010000
 #define IRQF_EARLY_RESUME	0x00020000
 #define IRQF_COND_SUSPEND	0x00040000
+
+#if (MP_PLATFORM_ARCH_GENERAL == 1)
+#define SA_INTERRUPT        0x00000000
+#endif /* MP_PLATFORM_ARM */
 
 #define IRQF_TIMER		(__IRQF_TIMER | IRQF_NO_SUSPEND | IRQF_NO_THREAD)
 

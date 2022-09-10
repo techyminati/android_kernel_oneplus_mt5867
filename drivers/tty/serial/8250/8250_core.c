@@ -25,6 +25,8 @@
 #include <linux/tty.h>
 #include <linux/ratelimit.h>
 #include <linux/tty_flip.h>
+#include <linux/serial_reg.h>
+#include <linux/serial_core.h>
 #include <linux/serial.h>
 #include <linux/serial_8250.h>
 #include <linux/nmi.h>
@@ -40,6 +42,7 @@
 #include <asm/irq.h>
 
 #include "8250.h"
+#include "chip_setup.h"
 
 /*
  * Configuration:
@@ -54,7 +57,7 @@ static struct uart_driver serial8250_reg;
 
 static unsigned int skip_txen_test; /* force skip of txen test at init time */
 
-#define PASS_LIMIT	512
+#define PASS_LIMIT     512
 
 #include <asm/serial.h>
 /*
@@ -66,6 +69,7 @@ static unsigned int skip_txen_test; /* force skip of txen test at init time */
 #define SERIAL_PORT_DFNS
 #endif
 
+extern void UART16550_WRITE(unsigned long iobase, u8 addr, u8 data);
 static const struct old_serial_port old_serial_port[] = {
 	SERIAL_PORT_DFNS /* defined in asm/serial.h */
 };
@@ -90,6 +94,100 @@ struct irq_info {
 static struct hlist_head irq_lists[NR_IRQ_HASH];
 static DEFINE_MUTEX(hash_mutex);	/* Used to walk the hash */
 
+#if (DYNAMIC_BAUDRATE_CHANGE_ENABLE)
+static bool UART16550_BaudRate_Change(struct uart_8250_port *up, int divisor);
+#endif
+
+#if (DYNAMIC_BAUDRATE_CHANGE_ENABLE)
+/*
+    For MStar Uart driver re-set baud rate
+*/
+static bool UART16550_BaudRate_Change(struct uart_8250_port *up, int divisor)
+{
+    static int pre_divisor = 0;
+    short count = 0;
+    bool bRet= 0;
+    unsigned int mcr, lcr, usr;
+    struct uart_port *port;
+
+    if (divisor != 0)
+        UART_REG(CHIPTOP_RIU, UART_SEL) |=UART1_DISABLE;
+    port = &up->port;
+    mcr = serial_in(up, UART_MCR);
+    lcr = serial_in(up, UART_LCR);
+
+repeat:
+    //step 1. set MCR loopback
+    serial_out(up, UART_MCR, (mcr | UART_MCR_LOOP));
+    //step 2. poll USR Busy 10 times
+    while (count++ < 10)
+    {
+        usr = serial_in(up, MSTAR_UART_USR);
+        if ((usr & MSTAR_UART_BUSY) ==0 && (usr & MSTAR_UART_RX_BUSY) == 0)
+        {
+            //step 3. set LCR dl_access
+            serial_out(up, UART_LCR, (lcr |UART_LCR_DLAB));
+            //step 4. Check if LCR dl_access or return fail
+            if ( !( serial_in(up, MSTAR_UART_LCR) & UART_LCR_DLAB))
+                goto repeat;
+
+            //step 5. set DLL & DLH
+			if (divisor == 0)
+			{
+	            serial_out(up, UART_DLL, UART_DIVISOR_L(pre_divisor));
+	            serial_out(up, UART_DLM, UART_DIVISOR_H(pre_divisor));
+			}
+			else
+			{
+				serial_out(up, UART_DLL, UART_DIVISOR_L(divisor));
+				serial_out(up, UART_DLM, UART_DIVISOR_H(divisor));
+				pre_divisor = divisor;
+			}
+			printk("Update UART divisor:0x%x\n", pre_divisor);
+            bRet = 1;
+            break;
+        }
+    }
+
+    if (count == 10)
+        printk(KERN_ERR"Uart is too busy to change baud rate: 0x%x !!\n", divisor);
+
+    //step 6. clear LCR DL access
+    serial_out(up, UART_LCR, lcr);
+    //step 7. clear MCR loopback
+    serial_out(up, UART_MCR, mcr);
+    if (divisor != 0)
+        UART_REG(CHIPTOP_RIU, UART_SEL) &=UART1_ENABLE;
+    return bRet;
+}
+
+static bool UART16550_Init(struct uart_8250_port *up)
+{
+    bool bRet= 0;
+    unsigned int ier;
+    struct uart_port *port;
+
+    port = &up->port;
+    ier = serial_in(up, UART_IER);
+
+    //disable uart1
+    UART_REG(CHIPTOP_RIU, UART_SEL) |=UART1_DISABLE;
+    //Toggle re-initial
+    UART16550_WRITE(up->port.iobase, MSTAR_UART_SWRST, MSTAR_UART_RST_ENABLE);
+    UART16550_WRITE(up->port.iobase, MSTAR_UART_SWRST, MSTAR_UART_RST_DISABLE);
+
+    //reset baud rate
+    bRet = UART16550_BaudRate_Change(up, 0);
+    //restore IER
+    serial_out(up, UART_IER, ier);
+    //restore FCR
+    serial_out(up, UART_FCR, (UART_FCR_ENABLE_FIFO | UART_FCR_CLEAR_RCVR |UART_FCR_CLEAR_XMIT |UART_FCR_T_TRIG_00| UART_FCR_R_TRIG_11));
+    //enable uart1
+    UART_REG(CHIPTOP_RIU, UART_SEL) &=UART1_ENABLE;
+    return bRet;
+}
+#endif  //#if (DYNAMIC_BAUDRATE_CHANGE_ENABLE)
+
 /*
  * This is the serial driver's interrupt routine.
  *
@@ -104,11 +202,16 @@ static DEFINE_MUTEX(hash_mutex);	/* Used to walk the hash */
  * This means we need to loop through all ports. checking that they
  * don't have an interrupt pending.
  */
+extern int silent_state;
+extern int g_in_hotel_mode;
 static irqreturn_t serial8250_interrupt(int irq, void *dev_id)
 {
 	struct irq_info *i = dev_id;
 	struct list_head *l, *end = NULL;
 	int pass_counter = 0, handled = 0;
+#if DYNAMIC_BAUDRATE_CHANGE_ENABLE
+	static unsigned short hang_counter = 0;
+#endif
 
 	pr_debug("%s(%d): start\n", __func__, irq);
 
@@ -119,10 +222,23 @@ static irqreturn_t serial8250_interrupt(int irq, void *dev_id)
 		struct uart_8250_port *up;
 		struct uart_port *port;
 
+		unsigned int iir;
+
 		up = list_entry(l, struct uart_8250_port, list);
 		port = &up->port;
 
-		if (port->handle_irq(port)) {
+		iir = serial_port_in(port, UART_IIR);
+		if (!(iir & UART_IIR_NO_INT)) {
+			serial8250_handle_irq(port, iir);
+			handled = 1;
+			end = NULL;
+		}
+		else if ((iir & UART_IIR_BUSY) == UART_IIR_BUSY)
+		{
+			unsigned int status;
+
+			status = serial_in(up, MSTAR_UART_USR);
+			serial_port_out(port, UART_LCR, up->lcr);
 			handled = 1;
 			end = NULL;
 		} else if (end == NULL)
@@ -132,11 +248,23 @@ static irqreturn_t serial8250_interrupt(int irq, void *dev_id)
 
 		if (l == i->head && pass_counter++ > PASS_LIMIT) {
 			/* If we hit this, we're dead. */
-			printk_ratelimited(KERN_ERR
-				"serial8250: too much work for irq%d\n", irq);
+			printk(KERN_ERR "serial8250: too much work usr:0x%x 0x%x\n", serial_in(up, MSTAR_UART_USR),  serial_in(up, MSTAR_UART_USR+1));
+ #if DYNAMIC_BAUDRATE_CHANGE_ENABLE
+			hang_counter++;
+			if (hang_counter == 10)
+			{
+				hang_counter =0;
+				printk(KERN_ERR "serial8250: recovery uart1...\n");
+				UART16550_Init(up);
+			}
+#endif
 			break;
 		}
 	} while (l != end);
+ #if DYNAMIC_BAUDRATE_CHANGE_ENABLE
+	if (pass_counter <= PASS_LIMIT)
+		hang_counter =0;
+ #endif
 
 	spin_unlock(&i->lock);
 
@@ -223,10 +351,6 @@ static int serial_link_irq_chain(struct uart_8250_port *up)
 
 static void serial_unlink_irq_chain(struct uart_8250_port *up)
 {
-	/*
-	 * yes, some broken gcc emit "warning: 'i' may be used uninitialized"
-	 * but no, we are not going to take a patch that assigns NULL below.
-	 */
 	struct irq_info *i;
 	struct hlist_node *n;
 	struct hlist_head *h;
@@ -277,7 +401,7 @@ static void serial8250_backup_timeout(struct timer_list *t)
 	 * Must disable interrupts or else we risk racing with the interrupt
 	 * based handler.
 	 */
-	if (up->port.irq) {
+	if (is_real_interrupt(up->port.irq)) {
 		ier = serial_in(up, UART_IER);
 		serial_out(up, UART_IER, 0);
 	}
@@ -302,7 +426,7 @@ static void serial8250_backup_timeout(struct timer_list *t)
 	if (!(iir & UART_IIR_NO_INT))
 		serial8250_tx_chars(up);
 
-	if (up->port.irq)
+	if (is_real_interrupt(up->port.irq))
 		serial_out(up, UART_IER, ier);
 
 	spin_unlock_irqrestore(&up->port.lock, flags);
@@ -336,19 +460,23 @@ static int univ8250_setup_irq(struct uart_8250_port *up)
 	 */
 	if (!port->irq) {
 		mod_timer(&up->timer, jiffies + uart_poll_timeout(port));
-	} else
+	} else {
+#ifdef CONFIG_MP_PLATFORM_ARM
+		mod_timer(&up->timer, jiffies + 100);
+#endif
 		retval = serial_link_irq_chain(up);
+	}
 
 	return retval;
 }
 
 static void univ8250_release_irq(struct uart_8250_port *up)
 {
-	struct uart_port *port = &up->port;
+	//struct uart_port *port = &up->port;
 
 	del_timer_sync(&up->timer);
 	up->timer.function = serial8250_timeout;
-	if (port->irq)
+	if (is_real_interrupt(up->port.irq))
 		serial_unlink_irq_chain(up);
 }
 
@@ -521,6 +649,7 @@ static void __init serial8250_isa_init_ports(void)
 		timer_setup(&up->timer, serial8250_timeout, 0);
 
 		up->ops = &univ8250_driver_ops;
+		up->tx_loadsz = 16;
 
 		/*
 		 * ALPHA_KLUDGE_MCR needs to be killed.
@@ -565,6 +694,7 @@ serial8250_register_ports(struct uart_driver *drv, struct device *dev)
 
 	for (i = 0; i < nr_uarts; i++) {
 		struct uart_8250_port *up = &serial8250_ports[i];
+		up->cur_iotype = 0xFF;
 
 		if (up->port.type == PORT_8250_CIR)
 			continue;
@@ -670,7 +800,7 @@ static struct console univ8250_console = {
 	.device		= uart_console_device,
 	.setup		= univ8250_console_setup,
 	.match		= univ8250_console_match,
-	.flags		= CON_PRINTBUFFER | CON_ANYTIME,
+	.flags		= CON_PRINTBUFFER,
 	.index		= -1,
 	.data		= &serial8250_reg,
 };
@@ -706,6 +836,11 @@ static struct uart_driver serial8250_reg = {
  * Setup an 8250 port structure prior to console initialisation.  Use
  * after console initialisation will cause undefined behaviour.
  */
+extern struct
+{
+	wait_queue_head_t wq;
+	struct semaphore sem;
+} MUDI_dev;
 int __init early_serial_setup(struct uart_port *port)
 {
 	struct uart_port *p;
@@ -738,6 +873,10 @@ int __init early_serial_setup(struct uart_port *port)
 		p->serial_out = port->serial_out;
 	if (port->handle_irq)
 		p->handle_irq = port->handle_irq;
+
+	//init_MUTEX(&MUDI_dev.sem);
+	sema_init(&MUDI_dev.sem, 1);
+	init_waitqueue_head(&MUDI_dev.wq);
 
 	return 0;
 }
@@ -779,14 +918,24 @@ void serial8250_resume_port(int line)
 	up->canary = 0;
 
 	if (up->capabilities & UART_NATSEMI) {
+		unsigned char tmp;
 		/* Ensure it's still in high speed mode */
 		serial_port_out(port, UART_LCR, 0xE0);
 
-		ns16550a_goto_highspeed(up);
+		tmp = serial_in(up, 0x04); /* EXCR2 */
+		tmp &= ~0xB0; /* Disable LOCK, mask out PRESL[01] */
+		tmp |= 0x10;  /* 1.625 divisor for baud_base --> 921600 */
+		serial_port_out(port, 0x04, tmp);
 
 		serial_port_out(port, UART_LCR, 0);
-		port->uartclk = 921600*16;
 	}
+
+    if((*(volatile unsigned short*)(RIU_VIRT_BASE+0x1C24)&=0x0800)==0)
+    {
+       printk("[BUG][PM_SLP]:uart_rx_enable is modified by others\n");
+       printk(">>>>>>   0x%X \n",*(volatile unsigned short*)(RIU_VIRT_BASE+0x1C24));
+    }
+
 	uart_resume_port(&serial8250_reg, port);
 }
 EXPORT_SYMBOL(serial8250_resume_port);
@@ -856,10 +1005,12 @@ static int serial8250_remove(struct platform_device *dev)
 	}
 	return 0;
 }
-
+static unsigned short reg_uart_sel0_tmp;
 static int serial8250_suspend(struct platform_device *dev, pm_message_t state)
 {
 	int i;
+
+        reg_uart_sel0_tmp = UART_REG(CHIPTOP_RIU, UART_SEL);
 
 	for (i = 0; i < UART_NR; i++) {
 		struct uart_8250_port *up = &serial8250_ports[i];
@@ -874,6 +1025,8 @@ static int serial8250_suspend(struct platform_device *dev, pm_message_t state)
 static int serial8250_resume(struct platform_device *dev)
 {
 	int i;
+
+        UART_REG(CHIPTOP_RIU, UART_SEL) = reg_uart_sel0_tmp;
 
 	for (i = 0; i < UART_NR; i++) {
 		struct uart_8250_port *up = &serial8250_ports[i];
@@ -973,6 +1126,7 @@ static void serial_8250_overrun_backoff_work(struct work_struct *work)
  *
  *	On success the port is ready to use and the line number is returned.
  */
+extern void update_uart_setting(struct uart_8250_port *uart, unsigned int port_type);
 int serial8250_register_8250_port(struct uart_8250_port *up)
 {
 	struct uart_8250_port *uart;
@@ -1003,10 +1157,10 @@ int serial8250_register_8250_port(struct uart_8250_port *up)
 		uart->port.private_data = up->port.private_data;
 		uart->tx_loadsz		= up->tx_loadsz;
 		uart->capabilities	= up->capabilities;
-		uart->port.throttle	= up->port.throttle;
-		uart->port.unthrottle	= up->port.unthrottle;
-		uart->port.rs485_config	= up->port.rs485_config;
-		uart->port.rs485	= up->port.rs485;
+		uart->port.throttle     = up->port.throttle;
+		uart->port.unthrottle   = up->port.unthrottle;
+		uart->port.rs485_config = up->port.rs485_config;
+		uart->port.rs485        = up->port.rs485;
 		uart->dma		= up->dma;
 
 		/* Take tx_loadsz from fifosize if it wasn't set separately */
@@ -1145,6 +1299,12 @@ static int __init serial8250_init(void)
 	serial8250_reg.nr = UART_NR;
 	ret = uart_register_driver(&serial8250_reg);
 #endif
+
+#ifndef CONFIG_MSTAR_ARM
+	serial8250_reg.tty_driver->init_termios.c_oflag &= ~OPOST;
+	serial8250_reg.tty_driver->init_termios.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+#endif
+
 	if (ret)
 		goto out;
 

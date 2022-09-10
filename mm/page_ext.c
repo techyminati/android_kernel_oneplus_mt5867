@@ -389,8 +389,12 @@ void __init page_ext_init(void)
 		 * page->flags of out of node pages are not initialized.  So we
 		 * scan [start_pfn, the biggest section's pfn < end_pfn) here.
 		 */
+#ifdef CONFIG_PLAT_MSTAR
+		for (pfn = start_pfn; pfn < end_pfn; pfn = pfn + 1) {
+#else
 		for (pfn = start_pfn; pfn < end_pfn;
 			pfn = ALIGN(pfn + 1, PAGES_PER_SECTION)) {
+#endif
 
 			if (!pfn_valid(pfn))
 				continue;

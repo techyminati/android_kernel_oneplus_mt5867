@@ -95,7 +95,11 @@
 ENTRY(__copy_to_user_std)
 WEAK(arm_copy_to_user)
 #ifdef CONFIG_CPU_SPECTRE
+#ifndef CONFIG_MP_IRQ_STACK
 	get_thread_info r3
+#else
+	get_thread_info 1, r3
+#endif
 	ldr	r3, [r3, #TI_ADDR_LIMIT]
 	uaccess_mask_range_ptr r0, r2, r3, ip
 #endif

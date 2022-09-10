@@ -10,6 +10,17 @@ static inline void device_pm_init_common(struct device *dev)
 	}
 }
 
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+#define STENT_RESUME_FROM_SUSPEND   3
+extern void set_state_value(int value);
+extern int get_state_value(void);
+extern void set_state_entering(void);
+extern int get_state_entering(void);
+extern void clear_state_entering(void);
+extern int is_mstar_str(void);
+extern int is_wakelock_ignored(void);
+#endif
+
 #ifdef CONFIG_PM
 
 static inline void pm_runtime_early_init(struct device *dev)
@@ -121,6 +132,17 @@ static inline bool device_pm_initialized(struct device *dev)
 static inline void device_pm_sleep_init(struct device *dev) {}
 
 static inline void device_pm_add(struct device *dev) {}
+
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+#define STENT_RESUME_FROM_SUSPEND   3
+extern void set_state_value(int value);
+extern int get_state_value(void);
+extern void set_state_entering(void);
+extern int get_state_entering(void);
+extern void clear_state_entering(void);
+extern int is_mstar_str(void);
+extern int is_wakelock_ignored(void);
+#endif
 
 static inline void device_pm_remove(struct device *dev)
 {

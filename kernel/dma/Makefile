@@ -1,4 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
+ifeq ($(CONFIG_MP_CMA_PATCH_CMA_MSTAR_DRIVER_BUFFER),y)
+EXTRA_CFLAGS      +=  -Idrivers/mstar2/include
+EXTRA_CFLAGS      +=  -Imm
+endif
 
 obj-$(CONFIG_HAS_DMA)			+= mapping.o
 obj-$(CONFIG_DMA_CMA)			+= contiguous.o

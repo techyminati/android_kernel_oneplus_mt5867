@@ -328,6 +328,9 @@
 		KEEP(*(__tracepoints_ptrs)) /* Tracepoints: pointer array */ \
 		__stop___tracepoints_ptrs = .;				\
 		*(__tracepoints_strings)/* Tracepoints: strings */	\
+		__mstar_fcie_rodata_start = .;          \
+		*(.FCIE.module.rodata)                                  \
+		__mstar_fcie_rodata_end = .;            \
 	}								\
 									\
 	.rodata1          : AT(ADDR(.rodata1) - LOAD_OFFSET) {		\
@@ -497,6 +500,9 @@
 		*(.text..refcount)					\
 		*(.text..ftrace)					\
 		*(.ref.text)						\
+		__mstar_fcie_text_start = .;        \
+		*(.FCIE.module.text)                    \
+		__mstar_fcie_text_end = .;      \
 	MEM_KEEP(init.text*)						\
 	MEM_KEEP(exit.text*)						\
 

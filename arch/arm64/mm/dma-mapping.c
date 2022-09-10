@@ -32,6 +32,14 @@
 #include <linux/pci.h>
 
 #include <asm/cacheflush.h>
+#include <mstar/mpatch_macro.h>
+
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+const struct dma_map_ops *dma_ops;		// this is for mstar flush bufferable memory
+#include "chip_setup.h"
+
+EXPORT_SYMBOL(dma_ops);
+#endif
 #include <asm/tlbflush.h>
 
 static int swiotlb __ro_after_init;
@@ -156,6 +164,7 @@ static void __dma_free(struct device *dev, size_t size,
 	swiotlb_free(dev, size, swiotlb_addr, dma_handle, attrs);
 }
 
+
 static dma_addr_t __swiotlb_map_page(struct device *dev, struct page *page,
 				     unsigned long offset, size_t size,
 				     enum dma_data_direction dir,
@@ -168,6 +177,9 @@ static dma_addr_t __swiotlb_map_page(struct device *dev, struct page *page,
 	    (attrs & DMA_ATTR_SKIP_CPU_SYNC) == 0)
 		__dma_map_area(phys_to_virt(dma_to_phys(dev, dev_addr)), size, dir);
 
+	#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
+        _chip_flush_miu_pipe();
+	#endif
 	return dev_addr;
 }
 
@@ -192,10 +204,25 @@ static int __swiotlb_map_sg_attrs(struct device *dev, struct scatterlist *sgl,
 	ret = swiotlb_map_sg_attrs(dev, sgl, nelems, dir, attrs);
 	if (!is_device_dma_coherent(dev) &&
 	    (attrs & DMA_ATTR_SKIP_CPU_SYNC) == 0)
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+	{
+#endif
 		for_each_sg(sgl, sg, ret, i)
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+		{
+			if(!pfn_valid(dma_to_phys(dev, sg->dma_address) >> PAGE_SHIFT))
+				continue;
+#endif
+
 			__dma_map_area(phys_to_virt(dma_to_phys(dev, sg->dma_address)),
 				       sg->length, dir);
-
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+		}
+	}
+#endif
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
+		_chip_flush_miu_pipe();
+#endif
 	return ret;
 }
 
@@ -209,9 +236,21 @@ static void __swiotlb_unmap_sg_attrs(struct device *dev,
 
 	if (!is_device_dma_coherent(dev) &&
 	    (attrs & DMA_ATTR_SKIP_CPU_SYNC) == 0)
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+	{
+#endif
 		for_each_sg(sgl, sg, nelems, i)
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+		{
+			if(!pfn_valid(dma_to_phys(dev, sg->dma_address) >> PAGE_SHIFT))
+				continue;
+#endif
 			__dma_unmap_area(phys_to_virt(dma_to_phys(dev, sg->dma_address)),
 					 sg->length, dir);
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+		}
+	}
+#endif
 	swiotlb_unmap_sg_attrs(dev, sgl, nelems, dir, attrs);
 }
 
@@ -231,6 +270,10 @@ static void __swiotlb_sync_single_for_device(struct device *dev,
 	swiotlb_sync_single_for_device(dev, dev_addr, size, dir);
 	if (!is_device_dma_coherent(dev))
 		__dma_map_area(phys_to_virt(dma_to_phys(dev, dev_addr)), size, dir);
+
+	#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
+        _chip_flush_miu_pipe();
+	#endif
 }
 
 static void __swiotlb_sync_sg_for_cpu(struct device *dev,
@@ -259,6 +302,10 @@ static void __swiotlb_sync_sg_for_device(struct device *dev,
 		for_each_sg(sgl, sg, nelems, i)
 			__dma_map_area(phys_to_virt(dma_to_phys(dev, sg->dma_address)),
 				       sg->length, dir);
+
+	#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
+        _chip_flush_miu_pipe();
+	#endif
 }
 
 static int __swiotlb_mmap_pfn(struct vm_area_struct *vma,
@@ -552,17 +599,30 @@ const struct dma_map_ops dummy_dma_ops = {
 };
 EXPORT_SYMBOL(dummy_dma_ops);
 
+#if defined(CONFIG_MP_MMA_UMA_WITH_NARROW) || defined(CONFIG_MP_ASYM_UMA_ALLOCATION)
+extern phys_addr_t max_zone_dma_phys(void);
+#endif
+
 static int __init arm64_dma_init(void)
 {
+#if defined(CONFIG_MP_MMA_UMA_WITH_NARROW) || defined(CONFIG_MP_ASYM_UMA_ALLOCATION)
 	if (swiotlb_force == SWIOTLB_FORCE ||
-	    max_pfn > (arm64_dma_phys_limit >> PAGE_SHIFT))
+	    max_pfn > (max_zone_dma_phys() >> PAGE_SHIFT))
 		swiotlb = 1;
+#else
+	if (swiotlb_force == SWIOTLB_FORCE ||
+		max_pfn > (arm64_dma_phys_limit >> PAGE_SHIFT))
+		swiotlb = 1;
+#endif
 
 	WARN_TAINT(ARCH_DMA_MINALIGN < cache_line_size(),
 		   TAINT_CPU_OUT_OF_SPEC,
 		   "ARCH_DMA_MINALIGN smaller than CTR_EL0.CWG (%d < %d)",
 		   ARCH_DMA_MINALIGN, cache_line_size());
 
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+	dma_ops = &arm64_swiotlb_dma_ops;
+#endif
 	return atomic_pool_init();
 }
 arch_initcall(arm64_dma_init);

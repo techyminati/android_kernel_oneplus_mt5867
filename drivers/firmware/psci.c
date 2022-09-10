@@ -34,6 +34,38 @@
 #include <asm/smp_plat.h>
 #include <asm/suspend.h>
 
+#ifdef CONFIG_MP_PLATFORM_ARM
+#include "mdrv_types.h"
+#include <asm/cacheflush.h>
+#endif
+
+#ifdef CONFIG_MP_MSTAR_STR_BASE
+#include "mdrv_mpm.h"
+#endif
+
+#include "mdrv_tee_general.h"
+extern void Chip_Flush_Cache_All_Single(void);
+
+#ifdef CONFIG_MP_PLATFORM_ARM
+#define PSCI_POWER_STATE_TYPE_STANDBY		0
+#define PSCI_POWER_STATE_TYPE_POWER_DOWN	1
+
+#define PSCI_MSTAR_ARMv8_64BIT		0x0
+#define PSCI_MSTAR_ARMv8_32BIT		0x1
+#define PSCI_MSTAR_ARMv7_32BIT		0x3
+#define PSCI_MSTAR_ARM_MODE_MSAK	0xff
+
+#define PSCI_MSTAR_USER_DRIVER		0x0000
+#define PSCI_MSTAR_KERNEL_DRIVER	0x0100
+#define PSCI_MSTAR_DRIVER_MODE_MSAK	0xff00
+
+#define PSCI_MSTAR_PMU_NOT_SUPPORT	0x000000
+#define PSCI_MSTAR_PMU_SUPPORT		0x010000
+#define PSCI_MSTAR_PMU_MODE_MSAK	0xff0000
+
+#define PSCI_MSTAR_WFE		0
+#define PSCI_MSTAR_WFI		1
+#endif
 /*
  * While a 64-bit OS can make calls with SMC32 calling conventions, for some
  * calls it is necessary to use SMC64 to pass or return 64-bit values.
@@ -44,6 +76,11 @@
 #define PSCI_FN_NATIVE(version, name)	PSCI_##version##_FN64_##name
 #else
 #define PSCI_FN_NATIVE(version, name)	PSCI_##version##_FN_##name
+#endif
+
+#ifdef CONFIG_MP_PLATFORM_ARM
+uint32_t isPSCI = PSCI_RET_NOT_SUPPORTED;
+uint32_t isPMU_SUPPORT = PSCI_RET_SUCCESS;
 #endif
 
 /*
@@ -161,7 +198,40 @@ static int psci_cpu_suspend(u32 state, unsigned long entry_point)
 	u32 fn;
 
 	fn = psci_function_id[PSCI_FN_CPU_SUSPEND];
+#ifdef CONFIG_MP_PLATFORM_ARM
+	if(TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE) {
+	#if defined(CONFIG_MP_MSTAR_STR_BASE)
+		extern int is_mstar_str(void);
+
+		/*
+		 * Flusing cache before SMC to secure world,
+		 * to make sure calculating CRC is corret
+		*/
+		flush_cache_all();
+
+		// is_mstar_str == 1 means user-mode STR
+		if(!is_mstar_str()) {
+			//Kernel mode Utopia
+			if (MDrv_MPM_Check_DC())
+				err = invoke_psci_fn(fn, state, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_KERNEL_DRIVER | PSCI_MSTAR_AC_BOOT);
+			else
+				err = invoke_psci_fn(fn, state, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_KERNEL_DRIVER | PSCI_MSTAR_STR_BOOT);
+		}
+		else {
+			//User mode Utopia
+			if (MDrv_MPM_Check_DC())
+				err = invoke_psci_fn(fn, state, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_USER_DRIVER | PSCI_MSTAR_AC_BOOT);
+			else
+				err = invoke_psci_fn(fn, state, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_USER_DRIVER | PSCI_MSTAR_STR_BOOT);
+		}
+	#endif
+	}
+	else {
+		err = invoke_psci_fn(fn, state, entry_point, 0);
+	}
+#else //CONFIG_MP_PLATFORM_ARM
 	err = invoke_psci_fn(fn, state, entry_point, 0);
+#endif
 	return psci_to_linux_errno(err);
 }
 
@@ -171,7 +241,16 @@ static int psci_cpu_off(u32 state)
 	u32 fn;
 
 	fn = psci_function_id[PSCI_FN_CPU_OFF];
+#ifdef CONFIG_MP_PLATFORM_ARM
+	if(TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE) {
+		err = invoke_psci_fn(fn, state, PSCI_MSTAR_WFE, 0);
+	}
+	else {
+		err = invoke_psci_fn(fn, state, 0, 0);
+	}
+#else //CONFIG_MP_PLATFORM_ARM
 	err = invoke_psci_fn(fn, state, 0, 0);
+#endif
 	return psci_to_linux_errno(err);
 }
 
@@ -181,7 +260,21 @@ static int psci_cpu_on(unsigned long cpuid, unsigned long entry_point)
 	u32 fn;
 
 	fn = psci_function_id[PSCI_FN_CPU_ON];
+#ifdef CONFIG_MP_PLATFORM_ARM
+	if(TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE)
+	{
+#ifdef  CONFIG_ARM64
+		err = invoke_psci_fn(fn, cpuid, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_USER_DRIVER);
+#else
+		err = invoke_psci_fn(fn, cpuid, entry_point, PSCI_MSTAR_ARMv8_32BIT | PSCI_MSTAR_USER_DRIVER);
+#endif
+
+	}
+	else
+		err = invoke_psci_fn(fn, cpuid, entry_point, 0);
+#else //CONFIG_MP_PLATFORM_ARM
 	err = invoke_psci_fn(fn, cpuid, entry_point, 0);
+#endif
 	return psci_to_linux_errno(err);
 }
 
@@ -198,8 +291,17 @@ static int psci_migrate(unsigned long cpuid)
 static int psci_affinity_info(unsigned long target_affinity,
 		unsigned long lowest_affinity_level)
 {
+#ifdef CONFIG_MP_PLATFORM_ARM
+	if(isPMU_SUPPORT == PSCI_RET_SUCCESS)
+		return invoke_psci_fn(PSCI_FN_NATIVE(0_2, AFFINITY_INFO),
+			      target_affinity, lowest_affinity_level, PSCI_MSTAR_PMU_SUPPORT);
+	else
+		return invoke_psci_fn(PSCI_FN_NATIVE(0_2, AFFINITY_INFO),
+			      target_affinity, lowest_affinity_level, 0);
+#else
 	return invoke_psci_fn(PSCI_FN_NATIVE(0_2, AFFINITY_INFO),
 			      target_affinity, lowest_affinity_level, 0);
+#endif
 }
 
 static int psci_migrate_info_type(void)
@@ -267,7 +369,7 @@ static int __init psci_features(u32 psci_func_id)
 			      psci_func_id, 0, 0);
 }
 
-#ifdef CONFIG_CPU_IDLE
+#if defined(CONFIG_CPU_IDLE) || defined(CONFIG_MP_PLATFORM_ARM)
 static DEFINE_PER_CPU_READ_MOSTLY(u32 *, psci_power_state);
 
 static int psci_dt_cpu_init_idle(struct device_node *cpu_node, int cpu)
@@ -416,11 +518,20 @@ int psci_cpu_suspend_enter(unsigned long index)
 	if (WARN_ON_ONCE(!index))
 		return -EINVAL;
 
+#ifdef CONFIG_MP_PLATFORM_ARM
+  	// [Note] 65536 is hardcode, it need to check state[] setting later.
+	if(TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE) {
+		return psci_ops.cpu_suspend(65536, 0x20280000);
+	}
+	else {
+		return psci_ops.cpu_suspend(65536, virt_to_phys(cpu_resume));
+	}
+#else
 	if (!psci_power_state_loses_context(state[index - 1]))
 		ret = psci_ops.cpu_suspend(state[index - 1], 0);
 	else
 		ret = cpu_suspend(index, psci_suspend_finisher);
-
+#endif
 	return ret;
 }
 
@@ -617,6 +728,10 @@ static int __init psci_0_2_init(struct device_node *np)
 	 */
 	err = psci_probe();
 
+#ifdef CONFIG_MSTAR_CHIP
+	if (!err)
+		isPSCI = PSCI_RET_SUCCESS;
+#endif
 out_put_node:
 	of_node_put(np);
 	return err;
@@ -656,7 +771,10 @@ static int __init psci_0_1_init(struct device_node *np)
 		psci_function_id[PSCI_FN_MIGRATE] = id;
 		psci_ops.migrate = psci_migrate;
 	}
-
+#ifdef CONFIG_MSTAR_CHIP
+	if (!err)
+		isPSCI = PSCI_RET_SUCCESS;
+#endif
 out_put_node:
 	of_node_put(np);
 	return err;

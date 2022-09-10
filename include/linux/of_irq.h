@@ -115,5 +115,7 @@ static inline unsigned int irq_of_parse_and_map(struct device_node *dev,
 	return 0;
 }
 #endif /* !CONFIG_OF */
-
+#ifdef CONFIG_MSTAR_CHIP
+int mtk_intc_get_irq(int index);
+#endif
 #endif /* __OF_IRQ_H */

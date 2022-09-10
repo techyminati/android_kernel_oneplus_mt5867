@@ -206,6 +206,11 @@ static inline unsigned long first_present_section_nr(void)
 }
 
 /* Record a memory area against a node. */
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+volatile int fake_init = 0;
+extern unsigned long fakemem_cma_start_pfn;
+extern unsigned long fakemem_cma_end_pfn;
+#endif
 void __init memory_present(int nid, unsigned long start, unsigned long end)
 {
 	unsigned long pfn;
@@ -236,6 +241,29 @@ void __init memory_present(int nid, unsigned long start, unsigned long end)
 			section_mark_present(ms);
 		}
 	}
+
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+	if(!fake_init)
+	{
+		for(pfn = fakemem_cma_start_pfn; pfn < fakemem_cma_end_pfn; pfn += PAGES_PER_SECTION)
+		{
+			unsigned long section = pfn_to_section_nr(pfn);
+			struct mem_section *ms;
+			printk(KERN_EMERG "\033[35mFunction = %s, go handling FAKEMEM mem_section 0x%lX to 0x%lX, @ section %lu\033[m\n", __PRETTY_FUNCTION__, pfn, fakemem_cma_end_pfn, section);
+
+			sparse_index_init(section, nid);
+			set_section_nid(section, nid);
+
+			ms = __nr_to_section(section);
+			if (!ms->section_mem_map)
+				ms->section_mem_map = sparse_encode_early_nid(nid) |
+								SECTION_IS_ONLINE;
+			section_mark_present(ms);
+		}
+
+		fake_init = 1;
+	}
+#endif
 }
 
 /*
@@ -428,8 +456,12 @@ void * __meminit sparse_buffer_alloc(unsigned long size)
 		ptr = PTR_ALIGN(sparsemap_buf, size);
 		if (ptr + size > sparsemap_buf_end)
 			ptr = NULL;
-		else
+		else {
+			if (ptr - sparsemap_buf > 0)
+				memblock_free_early(__pa(sparsemap_buf), ptr - sparsemap_buf);
+
 			sparsemap_buf = ptr + size;
+		}
 	}
 	return ptr;
 }

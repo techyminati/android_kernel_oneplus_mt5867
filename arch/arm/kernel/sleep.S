@@ -162,7 +162,22 @@ no_hyp:
 	add	r0, r0, r2
 	ldr	r0, [r0, #SLEEP_SAVE_SP_PHYS]
 	ldr	r0, [r0, r1, lsl #2]
-
+#ifdef CONFIG_MP_IRQ_STACK
+	push	{r4-r6}
+	mrs	r6, cpsr	@ Irq Save
+	cpsid	i		@ Disable Irq
+	mrc	p15, 0, r4, c0, c0, 5
+#ifdef CONFIG_MP_IRQ_STACK_WITH_FCM
+	lsr	r4, r4, #8
+#endif
+	and	r4, r4, #0xff
+	ldr	r5, =sp_mtk
+	add	r5, r5, r4, lsl #2
+	ldr	r4, [r0, #4]
+	str	r4, [r5]
+	msr	cpsr_c, r6	@ Enable Irq
+	pop	{r4-r6}
+#endif
 	@ load phys pgd, stack, resume fn
   ARM(	ldmia	r0!, {r1, sp, pc}	)
 THUMB(	ldmia	r0!, {r1, r2, r3}	)

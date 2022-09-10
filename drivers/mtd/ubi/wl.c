@@ -102,6 +102,7 @@
 #include <linux/crc32.h>
 #include <linux/freezer.h>
 #include <linux/kthread.h>
+#include <mstar/mpatch_macro.h>
 #include "ubi.h"
 #include "wl.h"
 
@@ -480,6 +481,27 @@ static int sync_erase(struct ubi_device *ubi, struct ubi_wl_entry *e,
 	spin_lock(&ubi->wl_lock);
 	if (e->ec > ubi->max_ec)
 		ubi->max_ec = e->ec;
+#if (MP_NAND_UBI == 1)
+	{
+		int idx;
+		for(idx = 0; idx < 10; idx ++)
+		{
+			if(ubi->top_ec[idx] < ec)
+			{
+				ubi->top_ec[idx] = ec;
+				break;
+			}
+		}
+		for(idx = 0; idx < 10; idx ++)
+		{
+			if(ubi->last_ec[idx] > ec)
+			{
+				ubi->last_ec[idx] = ec;
+				break;
+			}
+		}
+	}
+#endif
 	spin_unlock(&ubi->wl_lock);
 
 out_free:
@@ -673,7 +695,11 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
 	ubi_assert(!ubi->move_to_put);
 
 	if (!ubi->free.rb_node ||
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	    (!ubi->used.rb_node && !ubi->scrub.rb_node && !ubi->scrubbad.rb_node && !ubi->scrubtorture.rb_node)) {
+#else
 	    (!ubi->used.rb_node && !ubi->scrub.rb_node)) {
+#endif
 		/*
 		 * No free physical eraseblocks? Well, they must be waiting in
 		 * the queue to be erased. Cancel movement - it will be
@@ -707,7 +733,13 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
 		dbg_wl("anchor-move PEB %d to PEB %d", e1->pnum, e2->pnum);
 	} else if (!ubi->scrub.rb_node) {
 #else
+
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	if (!ubi->scrub.rb_node && !ubi->scrubbad.rb_node && !ubi->scrubtorture.rb_node) {
+#else
 	if (!ubi->scrub.rb_node) {
+#endif
+
 #endif
 		/*
 		 * Now pick the least worn-out used physical eraseblock and a
@@ -732,6 +764,25 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
 		rb_erase(&e1->u.rb, &ubi->used);
 		dbg_wl("move PEB %d EC %d to PEB %d EC %d",
 		       e1->pnum, e1->ec, e2->pnum, e2->ec);
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	} else if(ubi->scrubbad.rb_node) {
+		/* Perform scrubbing */
+		scrubbing = 2;
+		e1 = rb_entry(rb_first(&ubi->scrubbad), struct ubi_wl_entry, u.rb);
+		e2 = find_wl_entry(ubi, &ubi->free, WL_FREE_MAX_DIFF);
+		self_check_in_wl_tree(ubi, e1, &ubi->scrubbad);
+		rb_erase(&e1->u.rb, &ubi->scrubbad);
+		dbg_wl("scrubbad PEB %d to PEB %d", e1->pnum, e2->pnum);
+	} else if(ubi->scrubtorture.rb_node) {
+		/* Perform scrubbing */
+		scrubbing = 3;
+		e1 = rb_entry(rb_first(&ubi->scrubtorture), struct ubi_wl_entry, u.rb);
+		e2 = find_wl_entry(ubi, &ubi->free, WL_FREE_MAX_DIFF);
+		self_check_in_wl_tree(ubi, e1, &ubi->scrubtorture);
+		rb_erase(&e1->u.rb, &ubi->scrubtorture);
+		dbg_wl("scrubtorture PEB %d to PEB %d", e1->pnum, e2->pnum);
+
+#endif
 	} else {
 		/* Perform scrubbing */
 		scrubbing = 1;
@@ -826,6 +877,22 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
 			dst_leb_clean = 1;
 			goto out_not_moved;
 		}
+
+		#if (MP_NAND_UBI == 1)
+		if (err == MOVE_TARGET_BITFLIPS){
+			torture = 0;
+			goto out_not_moved;
+		}
+
+		if (err == MOVE_TARGET_WR_ERR || err == MOVE_TARGET_RD_ERR) {
+			/*
+			 * Target PEB had bit-flips or write error - torture it.
+			 */
+			torture = 1;
+			keep = 1;
+			goto out_not_moved;
+		}
+		#else
 		if (err == MOVE_TARGET_BITFLIPS || err == MOVE_TARGET_WR_ERR ||
 		    err == MOVE_TARGET_RD_ERR) {
 			/*
@@ -835,6 +902,7 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
 			keep = 1;
 			goto out_not_moved;
 		}
+		#endif
 
 		if (err == MOVE_SOURCE_RD_ERR) {
 			/*
@@ -876,6 +944,13 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
 	ubi->move_to_put = ubi->wl_scheduled = 0;
 	spin_unlock(&ubi->wl_lock);
 
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	if(scrubbing == 2)
+		err = do_sync_erase(ubi, e1, vol_id, lnum, 1);
+	else if (scrubbing == 3)
+		err = do_sync_erase(ubi, e1, vol_id, lnum, 2);
+	else
+#endif
 	err = do_sync_erase(ubi, e1, vol_id, lnum, 0);
 	if (err) {
 		if (e2)
@@ -918,8 +993,17 @@ out_not_moved:
 	else if (erroneous) {
 		wl_tree_add(e1, &ubi->erroneous);
 		ubi->erroneous_peb_count += 1;
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	} else if (scrubbing == 1)
+		wl_tree_add(e1, &ubi->scrub);
+	 else if (scrubbing == 2)
+		wl_tree_add(e1, &ubi->scrubbad);
+	 else if (scrubbing == 3)
+		wl_tree_add(e1, &ubi->scrubtorture);
+#else
 	} else if (scrubbing)
 		wl_tree_add(e1, &ubi->scrub);
+#endif
 	else if (keep)
 		wl_tree_add(e1, &ubi->used);
 	if (dst_leb_clean) {
@@ -1008,7 +1092,11 @@ static int ensure_wear_leveling(struct ubi_device *ubi, int nested)
 	 * If the ubi->scrub tree is not empty, scrubbing is needed, and the
 	 * the WL worker has to be scheduled anyway.
 	 */
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	if (!ubi->scrub.rb_node && !ubi->scrubbad.rb_node && !ubi->scrubtorture.rb_node) {
+#else
 	if (!ubi->scrub.rb_node) {
+#endif
 		if (!ubi->used.rb_node || !ubi->free.rb_node)
 			/* No physical eraseblocks - no deal */
 			goto out_unlock;
@@ -1262,6 +1350,14 @@ retry:
 		} else if (in_wl_tree(e, &ubi->scrub)) {
 			self_check_in_wl_tree(ubi, e, &ubi->scrub);
 			rb_erase(&e->u.rb, &ubi->scrub);
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+		} else if (in_wl_tree(e, &ubi->scrubbad)) {
+			self_check_in_wl_tree(ubi, e, &ubi->scrubbad);
+			rb_erase(&e->u.rb, &ubi->scrubbad);
+		} else if (in_wl_tree(e, &ubi->scrubtorture)) {
+			self_check_in_wl_tree(ubi, e, &ubi->scrubtorture);
+			rb_erase(&e->u.rb, &ubi->scrubtorture);
+#endif
 		} else if (in_wl_tree(e, &ubi->erroneous)) {
 			self_check_in_wl_tree(ubi, e, &ubi->erroneous);
 			rb_erase(&e->u.rb, &ubi->erroneous);
@@ -1303,7 +1399,11 @@ retry:
  * scrubbing which is done in background. This function returns zero in case of
  * success and a negative error code in case of failure.
  */
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+int ubi_wl_scrub_peb(struct ubi_device *ubi, int pnum, int scrubtree)
+#else
 int ubi_wl_scrub_peb(struct ubi_device *ubi, int pnum)
+#endif
 {
 	struct ubi_wl_entry *e;
 
@@ -1312,8 +1412,13 @@ int ubi_wl_scrub_peb(struct ubi_device *ubi, int pnum)
 retry:
 	spin_lock(&ubi->wl_lock);
 	e = ubi->lookuptbl[pnum];
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	if (e == ubi->move_from || in_wl_tree(e, &ubi->scrub) || in_wl_tree(e, &ubi->scrubbad) || in_wl_tree(e, &ubi->scrubtorture) ||
+				   in_wl_tree(e, &ubi->erroneous)) {
+#else
 	if (e == ubi->move_from || in_wl_tree(e, &ubi->scrub) ||
 				   in_wl_tree(e, &ubi->erroneous)) {
+#endif
 		spin_unlock(&ubi->wl_lock);
 		return 0;
 	}
@@ -1346,7 +1451,17 @@ retry:
 		}
 	}
 
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	if(scrubtree == 1)
 	wl_tree_add(e, &ubi->scrub);
+	else if(scrubtree == 2)
+		wl_tree_add(e, &ubi->scrubbad);
+	else if(scrubtree == 3)
+		wl_tree_add(e, &ubi->scrubtorture);
+#else
+	wl_tree_add(e, &ubi->scrub);
+#endif
+
 	spin_unlock(&ubi->wl_lock);
 
 	/*
@@ -1582,7 +1697,11 @@ int ubi_wl_init(struct ubi_device *ubi, struct ubi_attach_info *ai)
 	struct ubi_ainf_peb *aeb, *tmp;
 	struct ubi_wl_entry *e;
 
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	ubi->used = ubi->erroneous = ubi->free = ubi->scrub  = ubi->scrubbad = ubi->scrubtorture = RB_ROOT;
+#else
 	ubi->used = ubi->erroneous = ubi->free = ubi->scrub = RB_ROOT;
+#endif
 	spin_lock_init(&ubi->wl_lock);
 	mutex_init(&ubi->move_mutex);
 	init_rwsem(&ubi->work_sem);
@@ -1713,7 +1832,6 @@ int ubi_wl_init(struct ubi_device *ubi, struct ubi_attach_info *ai)
 		if (ubi->corr_peb_count)
 			ubi_err(ubi, "%d PEBs are corrupted and not used",
 				ubi->corr_peb_count);
-		err = -ENOSPC;
 		goto out_free;
 	}
 	ubi->avail_pebs -= reserved_pebs;
@@ -1731,6 +1849,10 @@ out_free:
 	tree_destroy(ubi, &ubi->used);
 	tree_destroy(ubi, &ubi->free);
 	tree_destroy(ubi, &ubi->scrub);
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	tree_destroy(ubi, &ubi->scrubbad);
+	tree_destroy(ubi, &ubi->scrubtorture);
+#endif
 	kfree(ubi->lookuptbl);
 	return err;
 }
@@ -1766,6 +1888,10 @@ void ubi_wl_close(struct ubi_device *ubi)
 	tree_destroy(ubi, &ubi->erroneous);
 	tree_destroy(ubi, &ubi->free);
 	tree_destroy(ubi, &ubi->scrub);
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	tree_destroy(ubi, &ubi->scrubbad);
+	tree_destroy(ubi, &ubi->scrubtorture);
+#endif
 	kfree(ubi->lookuptbl);
 }
 

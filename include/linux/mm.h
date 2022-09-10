@@ -27,6 +27,66 @@
 #include <linux/memremap.h>
 #include <linux/overflow.h>
 
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+enum {
+	CNT_FREE_PAGES,
+	CNT_FREE_CMA_PAGES,
+	CNT_FILE_PAGES,
+
+	CNT_PAGES_TYPE,
+};
+
+/* this is for counting memory usage */
+enum {
+	__alloc_pages_nodemask_count, /* 0 */
+	__perform_reclaim_count, /* 1 */
+	try_to_free_pages_count, /* 2 */
+	do_try_to_free_pages_count, /* 3 */
+	shrink_zones_count, /* 4 */
+	shrink_slab_count, /* 5 */
+	shrink_slab_node_count, /* 6 */
+	lowmem_scan_count, /* 7 */
+	__alloc_pages_direct_compact_count, /* 8 */
+	DB_MAX_CNT,
+};
+
+typedef struct
+{
+    char name[30];
+    atomic_t lone_time;
+	atomic_t do_cnt;
+	atomic_t pass_cnt;
+	atomic_t failed_cnt;
+
+	atomic_t min_page_cnt[CNT_PAGES_TYPE];
+	atomic_t max_page_cnt[CNT_PAGES_TYPE];
+	atomic_t order0_cnt[MIGRATE_TYPES];
+	atomic_t failed_order[MAX_ORDER];
+	atomic_t pass_order[MAX_ORDER];
+}db_time_table;
+#endif
+
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+enum {
+	MEMALLOC_SYM = 0,
+	MEMALLOC_ASYM = 1,
+	MEMALLOC_NUMBER,
+};
+
+#define MAX_MONITOR_PROCESS (20)
+#define TASK_COMM_LENGTH    (16)
+#define ZONE_NAME_LENGTH    (20)
+typedef struct {
+	char name_process[TASK_COMM_LENGTH];
+	char start_from_zone[ZONE_NAME_LENGTH]; // zone name
+	int pid_process;
+	atomic_t alloc_cnt_sym;
+	atomic_t alloc_cnt_asym;
+} alloc_monitor;
+extern alloc_monitor process_alloc_monitor[MAX_MONITOR_PROCESS];
+extern atomic_t total_monitor_process;
+#endif
+
 struct mempolicy;
 struct anon_vma;
 struct anon_vma_chain;
@@ -356,6 +416,7 @@ struct vm_fault {
 	unsigned int flags;		/* FAULT_FLAG_xxx flags */
 	gfp_t gfp_mask;			/* gfp mask to be used for allocations */
 	pgoff_t pgoff;			/* Logical page offset based on vma */
+	unsigned long fault_real_address;		/* Faulting real virtual address */
 	unsigned long address;		/* Faulting virtual address */
 	pmd_t *pmd;			/* Pointer to pmd entry matching
 					 * the 'address' */
@@ -543,6 +604,14 @@ static inline int get_page_unless_zero(struct page *page)
 }
 
 extern int page_is_ram(unsigned long pfn);
+
+#ifdef CONFIG_CMA
+#include <asm/dma-contiguous.h>
+#define CMA_DEBUG KERN_DEBUG
+#define CMA_WARNING KERN_NOTICE
+#define CMA_ERR KERN_ERR
+#define CMA_NOTICE KERN_NOTICE
+#endif
 
 enum {
 	REGION_INTERSECTS,

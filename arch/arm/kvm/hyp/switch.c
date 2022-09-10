@@ -134,12 +134,21 @@ static bool __hyp_text __populate_fault_info(struct kvm_vcpu *vcpu)
 	if (!(hsr & HSR_DABT_S1PTW) && (hsr & HSR_FSC_TYPE) == FSC_PERM) {
 		u64 par, tmp;
 
+#ifdef CONFIG_KASAN
+		par = read_sysreg(PAR_64);
+#else
 		par = read_sysreg(PAR);
+#endif
 		write_sysreg(far, ATS1CPR);
 		isb();
 
+#ifdef CONFIG_KASAN
+		tmp = read_sysreg(PAR_64);
+		write_sysreg(par, PAR_64);
+#else
 		tmp = read_sysreg(PAR);
 		write_sysreg(par, PAR);
+#endif
 
 		if (unlikely(tmp & 1))
 			return false; /* Translation failed, back to guest */

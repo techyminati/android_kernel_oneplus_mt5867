@@ -41,6 +41,9 @@
 #include "kasan.h"
 #include "../slab.h"
 
+#ifdef CONFIG_ARM
+bool kasan_initialized __read_mostly;
+#endif
 static inline int in_irqentry_text(unsigned long ptr)
 {
 	return (ptr >= (unsigned long)&__irqentry_text_start &&
@@ -226,6 +229,11 @@ void kasan_alloc_pages(struct page *page, unsigned int order)
 {
 	u8 tag;
 	unsigned long i;
+
+#ifdef CONFIG_ARM
+	if (unlikely(!kasan_initialized))
+		return;
+#endif
 
 	if (unlikely(PageHighMem(page)))
 		return;

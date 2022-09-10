@@ -28,8 +28,12 @@ static int pool_op_alloc(struct tee_shm_pool_mgr *poolm,
 	struct page *page;
 
 	page = alloc_pages(GFP_KERNEL | __GFP_ZERO, order);
-	if (!page)
+	if (!page) {
+		pr_crit("%s %s(%u) 0x%x failed\n",
+			__func__, current->comm, current->pid,
+			(unsigned int)size);
 		return -ENOMEM;
+	}
 
 	shm->kaddr = page_address(page);
 	shm->paddr = page_to_phys(page);

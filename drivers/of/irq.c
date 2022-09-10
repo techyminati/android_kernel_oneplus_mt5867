@@ -472,12 +472,35 @@ EXPORT_SYMBOL_GPL(of_irq_parse_one);
  * @index: zero-based index of the irq
  * @r: pointer to resource structure to return result into.
  */
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING) || defined(CONFIG_MP_PLATFORM_ARM_32bit_PORTING)
+extern void register_irq_proc(unsigned int irq, struct irq_desc *desc);
+#endif
 int of_irq_to_resource(struct device_node *dev, int index, struct resource *r)
 {
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING) || defined(CONFIG_MP_PLATFORM_ARM_32bit_PORTING)
+	struct irq_desc *desc;
+#endif
 	int irq = of_irq_get(dev, index);
 
 	if (irq < 0)
 		return irq;
+
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING) || defined(CONFIG_MP_PLATFORM_ARM_32bit_PORTING)
+	if(irq) {
+		desc = irq_to_desc(irq);
+
+		/*
+		 * Mstar patch, for creating /proc/irq/%d/.
+		 * This is because user_mode need to do open /proc/irq/%d and
+		 * thus do request_irq().
+		 * However, register_irq_proc() can only be called by request_irq()
+		 * and init_irq_proc(), and init_irq_proc() is called so early
+		 * before arm64_device_init()
+		 * We then add this for user_mode irq_register procedure.
+		 */
+		register_irq_proc(irq, desc);
+	}
+#endif
 
 	/* Only dereference the resource if both the
 	 * resource and the irq are valid. */

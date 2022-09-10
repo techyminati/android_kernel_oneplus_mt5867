@@ -67,6 +67,7 @@ void nmi_trigger_cpumask_backtrace(const cpumask_t *mask,
 		raise(to_cpumask(backtrace_mask));
 	}
 
+#ifndef CONFIG_MP_DEBUG_TOOL_SYSRQ
 	/* Wait for up to 10 seconds for all CPUs to do the backtrace */
 	for (i = 0; i < 10 * 1000; i++) {
 		if (cpumask_empty(to_cpumask(backtrace_mask)))
@@ -74,7 +75,7 @@ void nmi_trigger_cpumask_backtrace(const cpumask_t *mask,
 		mdelay(1);
 		touch_softlockup_watchdog();
 	}
-
+#endif
 	/*
 	 * Force flush any remote buffers that might be stuck in IRQ context
 	 * and therefore could not run their irq_work.

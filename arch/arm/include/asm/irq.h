@@ -14,6 +14,14 @@
 #define irq_canonicalize(i)	(i)
 #endif
 
+#ifdef CONFIG_MP_IRQ_STACK
+struct irq_stack {
+	void *stack;
+	unsigned long thread_sp;
+	unsigned int count;
+};
+#endif
+
 /*
  * Use this value to indicate lack of interrupt
  * capability

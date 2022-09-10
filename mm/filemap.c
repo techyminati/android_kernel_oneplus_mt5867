@@ -1014,6 +1014,23 @@ struct wait_page_queue {
 	wait_queue_entry_t wait;
 };
 
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+static int sleep_on_page_timeout(struct wait_bit_key *key, int mode)
+{
+	return io_schedule_timeout(2) ? 0 : -EAGAIN;
+}
+
+void wait_on_page_bit_timeout(struct page *page, int bit_nr)
+{
+	DEFINE_WAIT_BIT(wait, &page->flags, bit_nr);
+
+	if (test_bit(bit_nr, &page->flags))
+		__wait_on_bit(page_waitqueue(page), &wait,
+			(wait_bit_action_f *)sleep_on_page_timeout, TASK_UNINTERRUPTIBLE);
+}
+EXPORT_SYMBOL(wait_on_page_bit_timeout);
+#endif
+
 static int wake_page_function(wait_queue_entry_t *wait, unsigned mode, int sync, void *arg)
 {
 	struct wait_page_key *key = arg;
@@ -1617,6 +1634,9 @@ no_page:
 		if (fgp_flags & FGP_NOFS)
 			gfp_mask &= ~__GFP_FS;
 
+#ifdef CONFIG_MP_CMA_PATCH_USE_UNMOVABLE_FILE_CACHE
+		gfp_mask &= ~__GFP_MOVABLE;
+#endif
 		page = __page_cache_alloc(gfp_mask);
 		if (!page)
 			return NULL;

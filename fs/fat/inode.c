@@ -510,6 +510,9 @@ int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 {
 	struct msdos_sb_info *sbi = MSDOS_SB(inode->i_sb);
 	int error;
+#if MP_KERNEL_COMPAT_PATCH_FIX_INODE_CLUSTER_LIST
+	int fclus, dclus;
+#endif
 
 	MSDOS_I(inode)->i_pos = 0;
 	inode->i_uid = sbi->options.fs_uid;
@@ -525,6 +528,26 @@ int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 
 		MSDOS_I(inode)->i_start = fat_get_start(sbi, de);
 		MSDOS_I(inode)->i_logstart = MSDOS_I(inode)->i_start;
+#if MP_KERNEL_COMPAT_PATCH_FIX_INODE_CLUSTER_LIST
+		dclus = MSDOS_I(inode)->i_start;
+		error = fat_fix_inode_cluster(inode, &fclus, (inode->i_sb->s_maxbytes >> sbi->cluster_bits));
+		if (0 != error) {
+			printk("Detect FAT FS ERROR and it has already been fixed\n");
+		}
+		if (sbi->max_cluster <= dclus
+		    || (dclus < FAT_START_ENT && dclus != 0)) {
+			//fat_msg_ratelimit will not affect sb->s_flags
+			fat_msg_ratelimit(inode->i_sb, KERN_ERR, "invalid dir inode\n");
+
+			//fat_fs_error_ratelimit maybe set sb->s_flags |= MS_RDONLY
+			//Keep the same phenomenon with official source code
+			//fat_fs_error_ratelimit(inode->i_sb, "invalid dir inode\n");
+
+			MSDOS_I(inode)->i_start = 0;    //for damaged inode(dir entry)
+			inode->i_size = 0;
+			error =  -EPERM;
+		} else
+#endif
 		error = fat_calc_dir_size(inode);
 		if (error < 0)
 			return error;
@@ -548,6 +571,22 @@ int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 		inode->i_fop = &fat_file_operations;
 		inode->i_mapping->a_ops = &fat_aops;
 		MSDOS_I(inode)->mmu_private = inode->i_size;
+#if MP_KERNEL_COMPAT_PATCH_FIX_INODE_CLUSTER_LIST
+		error = fat_fix_inode_cluster(inode, &fclus, (int)((inode->i_size+sbi->cluster_size-1)>>sbi->cluster_bits));
+		if (0 == error) {
+			if(inode->i_size>fclus*sbi->cluster_size || 0==fclus) {
+				MSDOS_I(inode)->mmu_private = inode->i_size = fclus*sbi->cluster_size;
+				de->size = cpu_to_le32(inode->i_size);
+				if(0==fclus)
+				{
+					MSDOS_I(inode)->i_start = 0;
+					de->start = de->starthi = 0;
+				}
+				fat_sync_inode(inode);
+			}
+			//mark_inode_dirty(inode);
+		 }
+#endif
 	}
 	if (de->attr & ATTR_SYS) {
 		if (sbi->options.sys_immutable)
@@ -865,8 +904,14 @@ retry:
 	fat_get_blknr_offset(sbi, i_pos, &blocknr, &offset);
 	bh = sb_bread(sb, blocknr);
 	if (!bh) {
+#if (1 == MP_FAT_DEBUG_MESSAGE_CONTROL)
+		//usb maybe disconnect, so, we'd better ratelimit this print.
+		fat_msg_ratelimit(sb, KERN_ERR, "unable to read inode block "
+		       "for updating (i_pos %lld)", i_pos);
+#else
 		fat_msg(sb, KERN_ERR, "unable to read inode block "
 		       "for updating (i_pos %lld)", i_pos);
+#endif
 		return -EIO;
 	}
 	spin_lock(&sbi->inode_hash_lock);
@@ -1623,6 +1668,7 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 	sb->s_magic = MSDOS_SUPER_MAGIC;
 	sb->s_op = &fat_sops;
 	sb->s_export_op = &fat_export_ops;
+
 	mutex_init(&sbi->nfs_build_inode_lock);
 	ratelimit_state_init(&sbi->ratelimit, DEFAULT_RATELIMIT_INTERVAL,
 			     DEFAULT_RATELIMIT_BURST);

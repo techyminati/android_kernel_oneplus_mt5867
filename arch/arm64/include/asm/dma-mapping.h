@@ -26,13 +26,21 @@
 
 extern const struct dma_map_ops dummy_dma_ops;
 
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+extern const struct dma_map_ops *dma_ops;
+#endif
+
 static inline const struct dma_map_ops *get_arch_dma_ops(struct bus_type *bus)
 {
 	/*
 	 * We expect no ISA devices, and all other DMA masters are expected to
 	 * have someone call arch_setup_dma_ops at device creation time.
 	 */
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+	return dma_ops;
+#else
 	return &dummy_dma_ops;
+#endif
 }
 
 void arch_setup_dma_ops(struct device *dev, u64 dma_base, u64 size,

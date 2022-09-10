@@ -39,6 +39,10 @@ DEFINE_SPINLOCK(rtc_lock);
 EXPORT_SYMBOL(rtc_lock);
 #endif	/* pc-style 'CMOS' RTC support */
 
+#ifdef CONFIG_MP_IRQ_STACK
+EXPORT_SYMBOL(current_thread_info);
+#endif
+
 /* change this if you have some constant time drift */
 #define USECS_PER_JIFFY	(1000000/HZ)
 

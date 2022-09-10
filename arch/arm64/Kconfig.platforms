@@ -299,6 +299,30 @@ config ARCH_ZX
 	help
 	  This enables support for ZTE ZX SoC Family
 
+config ARCH_MSTAR
+	bool "Mstar ARM-based"
+	select ARM_AMBA
+	select ARCH_HAS_CPUFREQ
+	select CLKDEV_LOOKUP
+	select GENERIC_CLOCKEVENTS
+	select ARCH_SCHED_CLOCK
+	select HAVE_CLK
+	select HAVE_SMP
+	select PLAT_MSTAR
+	select MSTAR_CHIP
+	select ARCH_HAS_HOLES_MEMORYMODEL
+	select COMMON_CLK
+	select ARCH_SPARSEMEM_ENABLE
+	help
+	  Support mstar chip porting
+
+#mstar Kconfig
+source "arch/arm64/arm-boards/Kconfig"
+source "arch/arm64/arm-boards/plat-mstar/Kconfig"
+
+config PLAT_MSTAR
+	bool
+
 config ARCH_ZYNQMP
 	bool "Xilinx ZynqMP Family"
 	help

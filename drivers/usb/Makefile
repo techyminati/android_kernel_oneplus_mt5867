@@ -67,3 +67,7 @@ obj-$(CONFIG_USBIP_CORE)	+= usbip/
 obj-$(CONFIG_TYPEC)		+= typec/
 
 obj-$(CONFIG_USB_ROLE_SWITCH)	+= roles/
+
+ifneq (,$(wildcard $(srctree)/drivers/usb/usbcimoduledrv.c))
+obj-$(CONFIG_CI_PLUS) += usbcimoduledrv.o
+endif

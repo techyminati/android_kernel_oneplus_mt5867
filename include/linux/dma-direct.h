@@ -12,12 +12,22 @@ static inline dma_addr_t __phys_to_dma(struct device *dev, phys_addr_t paddr)
 {
 	dma_addr_t dev_addr = (dma_addr_t)paddr;
 
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+	if(!dev)
+		return dev_addr;
+#endif
+
 	return dev_addr - ((dma_addr_t)dev->dma_pfn_offset << PAGE_SHIFT);
 }
 
 static inline phys_addr_t __dma_to_phys(struct device *dev, dma_addr_t dev_addr)
 {
 	phys_addr_t paddr = (phys_addr_t)dev_addr;
+
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+	if(!dev)
+		return paddr;
+#endif
 
 	return paddr + ((phys_addr_t)dev->dma_pfn_offset << PAGE_SHIFT);
 }

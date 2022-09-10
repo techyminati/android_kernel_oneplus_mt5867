@@ -7,6 +7,11 @@
 
 #include "pelt.h"
 
+#if defined(CONFIG_MP_AUDIO_DECODE_PERFORMANCE)
+extern unsigned int set_audio_mask;
+unsigned int sysctl_bind_android_bg = 0;
+#endif
+
 int sched_rr_timeslice = RR_TIMESLICE;
 int sysctl_sched_rr_timeslice = (MSEC_PER_SEC / HZ) * RR_TIMESLICE;
 
@@ -1359,7 +1364,71 @@ static void dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags)
 	}
 	enqueue_top_rt_rq(&rq->rt);
 }
+#if defined(CONFIG_MP_AUDIO_DECODE_PERFORMANCE)
+static int modify_rt_affinity(struct task_struct *p, char *target_comm)
+{
+	int target_cpu_audio = 0;
+	int target_cpu_anbg = 0;
 
+	target_cpu_audio = (int)num_online_cpus()-1;
+	target_cpu_anbg = (int)num_online_cpus()-2;
+
+	if (target_comm != NULL) {
+		cpumask_var_t new_cpumask;
+		if (!alloc_cpumask_var(&new_cpumask, GFP_KERNEL))
+			return -ENOMEM;
+		cpumask_clear(new_cpumask);
+		cpumask_set_cpu(target_cpu_audio, new_cpumask);
+		cpumask_copy(&p->cpus_allowed, new_cpumask);
+		p->nr_cpus_allowed = 1;
+		free_cpumask_var(new_cpumask);
+	}
+	else {
+		if (sysctl_bind_android_bg && cpumask_test_cpu(target_cpu_anbg, &p->cpus_allowed)) {
+			cpumask_var_t new_cpumask;
+			if (!alloc_cpumask_var(&new_cpumask, GFP_KERNEL))
+				return -ENOMEM;
+			cpumask_copy(new_cpumask, &p->cpus_allowed);
+			cpumask_clear_cpu(target_cpu_anbg, new_cpumask);
+			cpumask_copy(&p->cpus_allowed, new_cpumask);
+			p->nr_cpus_allowed -= 1;
+			free_cpumask_var(new_cpumask);
+		}
+		else if (!sysctl_bind_android_bg && !cpumask_test_cpu(target_cpu_anbg, &p->cpus_allowed)) {
+			cpumask_var_t new_cpumask;
+			if (!alloc_cpumask_var(&new_cpumask, GFP_KERNEL))
+				return -ENOMEM;
+			cpumask_copy(new_cpumask, &p->cpus_allowed);
+			cpumask_set_cpu(target_cpu_anbg, new_cpumask);
+			cpumask_copy(&p->cpus_allowed, new_cpumask);
+			p->nr_cpus_allowed += 1;
+			free_cpumask_var(new_cpumask);
+		}
+#if 0 // Since cpu_audio has RR97, this policy could be unnecessary
+		if (sysctl_enable_audio_decoding && sysctl_enable_audio_decode_scheduler && cpumask_test_cpu(target_cpu_audio, &p->cpus_allowed) && set_audio_mask) {
+			cpumask_var_t new_cpumask;
+			if (!alloc_cpumask_var(&new_cpumask, GFP_KERNEL))
+				return -ENOMEM;
+			cpumask_copy(new_cpumask, &p->cpus_allowed);
+			cpumask_clear_cpu(target_cpu_audio, new_cpumask);
+			cpumask_copy(&p->cpus_allowed, new_cpumask);
+			p->nr_cpus_allowed -= 1;
+			free_cpumask_var(new_cpumask);
+		} else if ((!sysctl_enable_audio_decoding || !sysctl_enable_audio_decode_scheduler) && !cpumask_test_cpu(target_cpu_audio, &p->cpus_allowed)) {
+			cpumask_var_t new_cpumask;
+			if (!alloc_cpumask_var(&new_cpumask, GFP_KERNEL))
+				return -ENOMEM;
+			cpumask_copy(new_cpumask, &p->cpus_allowed);
+			cpumask_set_cpu(target_cpu_audio, new_cpumask);
+			cpumask_copy(&p->cpus_allowed, new_cpumask);
+			p->nr_cpus_allowed += 1;
+			free_cpumask_var(new_cpumask);
+		}
+#endif
+	}
+	return 0;
+}
+#endif
 /*
  * Adding/removing a task to/from a priority array:
  */
@@ -1435,6 +1504,21 @@ select_task_rq_rt(struct task_struct *p, int cpu, int sd_flag, int flags,
 	struct task_struct *curr;
 	struct rq *rq;
 	bool test;
+#if defined(CONFIG_MP_AUDIO_DECODE_PERFORMANCE)
+	if (num_online_cpus() > 2)
+	{
+		if ((set_audio_mask == 0) && (strlen(sysctl_audio_process_name) != 0) && (strstr(p->comm, sysctl_audio_process_name) != NULL)) {
+			if (modify_rt_affinity(p, sysctl_audio_process_name) != 0)
+			{
+				pr_err("%s(): Can't modify rt affinity!", __FUNCTION__);
+			}
+			else
+				set_audio_mask = 1;
+		}
+		else
+			modify_rt_affinity(p, NULL);
+	}
+#endif
 
 	/* For anything but wake ups, just return the task_cpu */
 	if (sd_flag != SD_BALANCE_WAKE && sd_flag != SD_BALANCE_FORK)

@@ -27,6 +27,13 @@
 static DEFINE_PER_CPU(struct cpu_dbs_info, cpu_dbs);
 
 static DEFINE_MUTEX(gov_dbs_data_mutex);
+#if defined(CONFIG_MP_DVFS_CPUHOTPLUG_USE_ONLINE_CPU_MAX_LOAD) && defined(CONFIG_MSTAR_DVFS)
+extern struct mutex mstar_cpuload_lock;
+extern unsigned int mstar_cpu_load_freq[CONFIG_NR_CPUS];
+#elif defined(CONFIG_ARM_MTKTV_CPUFREQ)
+extern struct mutex mtktv_cpuload_lock;
+extern unsigned int mtktv_cpu_load_freq[CONFIG_NR_CPUS];
+#endif
 
 /* Common sysfs tunables */
 /**
@@ -224,6 +231,16 @@ unsigned int dbs_update(struct cpufreq_policy *policy)
 
 		if (load > max_load)
 			max_load = load;
+
+#if defined(CONFIG_MP_DVFS_CPUHOTPLUG_USE_ONLINE_CPU_MAX_LOAD) && defined(CONFIG_MSTAR_DVFS)
+		mutex_lock(&mstar_cpuload_lock);
+		mstar_cpu_load_freq[j] = max_load;
+		mutex_unlock(&mstar_cpuload_lock);
+#elif defined(CONFIG_ARM_MTKTV_CPUFREQ)
+		mutex_lock(&mtktv_cpuload_lock);
+		mtktv_cpu_load_freq[j] = load;
+		mutex_unlock(&mtktv_cpuload_lock);
+#endif
 	}
 
 	policy_dbs->idle_periods = idle_periods;

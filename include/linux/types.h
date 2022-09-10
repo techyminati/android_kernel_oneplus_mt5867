@@ -5,6 +5,10 @@
 #define __EXPORTED_HEADERS__
 #include <uapi/linux/types.h>
 
+#ifdef CONFIG_MP_DEBUG_TOOL_CHANGELIST
+#include <linux/release_version.h>
+#endif
+
 #ifndef __ASSEMBLY__
 
 #define DECLARE_BITMAP(name,bits) \

@@ -4,7 +4,6 @@
 menu "USB Physical Layer drivers"
 
 config USB_PHY
-	select EXTCON
 	def_bool n
 
 #
@@ -148,6 +147,44 @@ config USB_MV_OTG
 	  implements role switch between EHCI host driver and gadget driver.
 
 	  To compile this driver as a module, choose M here.
+
+config MS_OTG_ENABLE
+	bool
+	default y
+
+config USB_MS_OTG
+	tristate "Mstar USB OTG support"
+	depends on USB_EHCI_HCD && USB_GADGET_MSB250X && MS_OTG_ENABLE
+	select USB_OTG_UTILS
+	help
+		Say Y here if you want to build Mstar USB OTG transceiver
+		driver in kernel. This driver implements role switch between
+		EHCI host driver and gadget driver
+
+		To compile this driver as module, choose M here.
+choice
+	prompt "OTG operation mode"
+	default MS_OTG_DEFAULT
+
+config MS_OTG_DEFAULT
+	bool "OTG Dual-Role mode detected by hardware"
+	help
+		OTG default operation mode
+
+config MS_FORCE_DEVICE
+	bool "Force to Peripheral mode"
+	depends on USB_MS_OTG
+	help
+        	OTG is forced in perpherial mode.
+
+config MS_OTG_SOFTWARE_ID
+	bool "OTG Dual-Role selected by software"
+	depends on USB_MS_OTG
+	help
+		OTG Host,Peripheral mode manual selection by software_id
+		1 for device(B),0 for host(A).
+endchoice
+
 
 config USB_MXS_PHY
 	tristate "Freescale MXS USB PHY support"

@@ -671,6 +671,7 @@ int __handle_domain_irq(struct irq_domain *domain, unsigned int hwirq,
 	 */
 	if (unlikely(!irq || irq >= nr_irqs)) {
 		ack_bad_irq(irq);
+		pr_crit("unexpected IRQ trap at vector %02x\n", hwirq);
 		ret = -EINVAL;
 	} else {
 		generic_handle_irq(irq);

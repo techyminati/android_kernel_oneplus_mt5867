@@ -113,6 +113,9 @@ struct smp_operations {
 	bool  (*cpu_can_disable)(unsigned int cpu);
 	int  (*cpu_disable)(unsigned int cpu);
 #endif
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+	int (*cpu_suspend)(unsigned long index,void *entry_point);
+#endif
 #endif
 };
 

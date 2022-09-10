@@ -464,6 +464,16 @@ static struct scsi_dev_info_list *scsi_dev_info_list_find(const char *vendor,
 			mlen = strnlen(devinfo->model, sizeof(devinfo->model));
 			if (mmax < mlen || memcmp(devinfo->model, mskip, mlen))
 				continue;
+#if (MP_SCSI_MULTI_LUN == 1)
+			/* If vendor string is NULL, it'll check further model string.
+			 * But device with NULL model string will match any model string
+			 * in the list. Now fix it. By Jonas_20150722
+			 */
+			if ((strlen(devinfo->vendor) == 0) &&
+			 	(strlen(devinfo->model) != 0) &&
+			 	(mmax == 0))
+			 	continue;
+#endif
 			return devinfo;
 		} else {
 			if (!memcmp(devinfo->vendor, vendor,

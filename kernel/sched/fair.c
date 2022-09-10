@@ -50,6 +50,23 @@ unsigned int sysctl_sched_sync_hint_enable = 1;
  */
 unsigned int sysctl_sched_cstate_aware = 1;
 
+#if defined(CONFIG_MP_AUDIO_DECODE_PERFORMANCE)
+#include <linux/irq.h>
+unsigned int sysctl_enable_audio_decoding = 0;
+unsigned int sysctl_enable_audio_decode_scheduler = 1;
+char sysctl_audio_process_name[TASK_COMM_LEN];
+unsigned int set_audio_mask = 0;
+unsigned int set_spi_id = 0;
+/*
+* The spi_id is the spi interrupts which may run on the cpu mask of audio process.
+* According to different platform, spi_id must be reset.
+*/
+#define SPI_ID_NUM 1
+#define IRQ_ID_ETH0 41
+unsigned int spi_id[SPI_ID_NUM]={IRQ_ID_ETH0};
+const struct cpumask *spi_mask;
+#endif
+
 /*
  * The initial- and re-scaling of tunables is configurable
  *
@@ -6636,7 +6653,6 @@ static void find_best_target(struct sched_domain *sd, cpumask_t *cpus,
 	bool prefer_idle;
 	bool boosted;
 	int i;
-
 	/*
 	 * In most cases, target_capacity tracks capacity_orig of the most
 	 * energy efficient CPU candidate, thus requiring to minimise
@@ -6843,7 +6859,6 @@ static void find_best_target(struct sched_domain *sd, cpumask_t *cpus,
 				best_idle_cpu = i;
 				continue;
 			}
-
 			/*
 			 * Case C) Non latency sensitive tasks on ACTIVE CPUs.
 			 *
@@ -6868,7 +6883,6 @@ static void find_best_target(struct sched_domain *sd, cpumask_t *cpus,
 			if (capacity_orig == target_capacity &&
 			    spare_cap < target_max_spare_cap)
 				continue;
-
 			target_max_spare_cap = spare_cap;
 			target_capacity = capacity_orig;
 			target_util = new_util;
@@ -7292,6 +7306,43 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
 	int new_cpu = prev_cpu;
 	int want_affine = 0;
 	int sync = (wake_flags & WF_SYNC) && !(current->flags & PF_EXITING);
+
+#if defined(CONFIG_MP_AUDIO_DECODE_PERFORMANCE)
+	if (sysctl_enable_audio_decoding && set_audio_mask && sysctl_enable_audio_decode_scheduler)  {
+		if(!set_spi_id) {
+			int loop;
+			cpumask_var_t new_mask;
+			if(!alloc_cpumask_var(&new_mask, GFP_KERNEL))
+				return -ENOMEM;
+			for (loop=SPI_ID_NUM; loop>0 ; loop--) {
+				struct irq_desc *spi_desc = irq_to_desc(spi_id[loop-1]);
+				if(spi_desc) {
+					spi_mask = spi_desc->irq_common_data.affinity;
+					cpumask_copy(new_mask, spi_mask);
+					cpumask_clear_cpu(num_online_cpus()-1, new_mask);
+					irq_set_affinity(spi_id[loop-1], (const struct cpumask*)&new_mask);
+				}
+			}
+			free_cpumask_var(new_mask);
+			set_spi_id = 1;
+		}
+	} else {
+		// Reset the affinity for the spi_id when audio decoding disabled.
+		if (set_spi_id) {
+			int loop;
+			cpumask_var_t new_mask;
+			if(!alloc_cpumask_var(&new_mask, GFP_KERNEL))
+				return -ENOMEM;
+			for (loop=SPI_ID_NUM; loop>0 ; loop--) {
+				cpumask_copy(new_mask, &p->cpus_allowed);
+				cpumask_set_cpu(num_online_cpus()-1, new_mask);
+				irq_set_affinity(spi_id[loop-1], (const struct cpumask*)&new_mask);
+			}
+			free_cpumask_var(new_mask);
+			set_spi_id = 0;
+		}
+	}
+#endif
 
 	if (sd_flag & SD_BALANCE_WAKE) {
 		record_wakee(p);

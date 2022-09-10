@@ -17,6 +17,10 @@
 #include <linux/slab.h>
 #include <linux/tee_drv.h>
 #include "tee_private.h"
+#ifdef CONFIG_MSTAR_CHIP
+#define CREATE_TRACE_POINTS
+#include "trace/events/tee.h"
+#endif
 
 static int pool_op_gen_alloc(struct tee_shm_pool_mgr *poolm,
 			     struct tee_shm *shm, size_t size)
@@ -24,10 +28,19 @@ static int pool_op_gen_alloc(struct tee_shm_pool_mgr *poolm,
 	unsigned long va;
 	struct gen_pool *genpool = poolm->private_data;
 	size_t s = roundup(size, 1 << genpool->min_alloc_order);
-
+#ifdef CONFIG_MSTAR_CHIP
+	ktime_t t1 = ktime_set(0, 0);
+	ktime_t t2 = ktime_set(0, 0);
+#endif
+	MTK_TRACE_TEE_START("Alloc", s, t1);
 	va = gen_pool_alloc(genpool, s);
-	if (!va)
+	MTK_TRACE_TEE_END("Alloc", s, va, t1, t2);
+	if (!va) {
+		pr_crit("%s %s(%u) 0x%x failed\n",
+			__func__, current->comm, current->pid,
+			(unsigned int)s);
 		return -ENOMEM;
+	}
 
 	memset((void *)va, 0, s);
 	shm->kaddr = (void *)va;
@@ -157,7 +170,7 @@ static bool check_mgr_ops(struct tee_shm_pool_mgr *mgr)
 	return mgr && mgr->ops && mgr->ops->alloc && mgr->ops->free &&
 		mgr->ops->destroy_poolmgr;
 }
-
+#ifdef CONFIG_TEE_2_4
 struct tee_shm_pool *tee_shm_pool_alloc(struct tee_shm_pool_mgr *priv_mgr,
 					struct tee_shm_pool_mgr *dmabuf_mgr)
 {
@@ -176,7 +189,6 @@ struct tee_shm_pool *tee_shm_pool_alloc(struct tee_shm_pool_mgr *priv_mgr,
 	return pool;
 }
 EXPORT_SYMBOL_GPL(tee_shm_pool_alloc);
-
 /**
  * tee_shm_pool_free() - Free a shared memory pool
  * @pool:	The shared memory pool to free
@@ -193,3 +205,4 @@ void tee_shm_pool_free(struct tee_shm_pool *pool)
 	kfree(pool);
 }
 EXPORT_SYMBOL_GPL(tee_shm_pool_free);
+#endif

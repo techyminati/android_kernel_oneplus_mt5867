@@ -26,3 +26,7 @@ subdir-y += synaptics
 subdir-y += ti
 subdir-y += xilinx
 subdir-y += zte
+ifeq ($(CONFIG_MSTAR_CHIP),y)
+subdir-y += mediatek-dtv
+endif
+

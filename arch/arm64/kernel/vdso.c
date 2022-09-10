@@ -31,7 +31,6 @@
 #include <linux/slab.h>
 #include <linux/timekeeper_internal.h>
 #include <linux/vmalloc.h>
-
 #include <asm/cacheflush.h>
 #include <asm/signal32.h>
 #include <asm/vdso.h>
@@ -202,7 +201,6 @@ int arch_setup_additional_pages(struct linux_binprm *bprm,
 				       &vdso_spec[1]);
 	if (IS_ERR(ret))
 		goto up_fail;
-
 
 	up_write(&mm->mmap_sem);
 	return 0;

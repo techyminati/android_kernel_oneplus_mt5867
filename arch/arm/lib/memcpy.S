@@ -61,6 +61,10 @@
 
 /* Prototype: void *memcpy(void *dest, const void *src, size_t n); */
 
+#ifdef CONFIG_KASAN
+.weak memcpy
+ENTRY(__memcpy)
+#endif
 ENTRY(mmiocpy)
 ENTRY(memcpy)
 
@@ -68,3 +72,6 @@ ENTRY(memcpy)
 
 ENDPROC(memcpy)
 ENDPROC(mmiocpy)
+#ifdef CONFIG_KASAN
+ENDPROC(__memcpy)
+#endif

@@ -14,7 +14,11 @@
 /* A global variable is a bit ugly, but it keeps the code simple */
 int sysctl_drop_caches;
 
+#ifdef CONFIG_MP_CMA_PATCH_CMA_MSTAR_DRIVER_BUFFER
+void drop_pagecache_sb(struct super_block *sb, void *unused)
+#else
 static void drop_pagecache_sb(struct super_block *sb, void *unused)
+#endif
 {
 	struct inode *inode, *toput_inode = NULL;
 

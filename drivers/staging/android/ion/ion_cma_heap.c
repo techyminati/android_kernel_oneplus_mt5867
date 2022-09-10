@@ -139,7 +139,8 @@ int ion_add_cma_heaps(void)
 	cma_for_each_area(__ion_add_cma_heaps, NULL);
 	return 0;
 }
-
+#ifndef CONFIG_MSTAR_CHIP
 #ifndef CONFIG_ION_MODULE
 device_initcall(ion_add_cma_heaps);
+#endif
 #endif

@@ -273,6 +273,7 @@ config PAGE_OWNER
 	select STACKTRACE
 	select STACKDEPOT
 	select PAGE_EXTENSION
+	select MP_DEBUG_TOOL_MSTAR_PAGE_OWNER
 	help
 	  This keeps track of what call chain is the owner of a page, may
 	  help to find bare alloc_page(s) leaks. Even if you include this

@@ -404,12 +404,6 @@ dtb-$(CONFIG_SOC_IMX6Q) += \
 	imx6dl-gw560x.dtb \
 	imx6dl-gw5903.dtb \
 	imx6dl-gw5904.dtb \
-	imx6dl-hummingboard.dtb \
-	imx6dl-hummingboard-emmc-som-v15.dtb \
-	imx6dl-hummingboard-som-v15.dtb \
-	imx6dl-hummingboard2.dtb \
-	imx6dl-hummingboard2-emmc-som-v15.dtb \
-	imx6dl-hummingboard2-som-v15.dtb \
 	imx6dl-icore.dtb \
 	imx6dl-icore-mipi.dtb \
 	imx6dl-icore-rqs.dtb \
@@ -438,9 +432,6 @@ dtb-$(CONFIG_SOC_IMX6Q) += \
 	imx6dl-tx6u-811x.dtb \
 	imx6dl-tx6u-81xx-mb7.dtb \
 	imx6dl-udoo.dtb \
-	imx6dl-wandboard.dtb \
-	imx6dl-wandboard-revb1.dtb \
-	imx6dl-wandboard-revd1.dtb \
 	imx6q-apalis-eval.dtb \
 	imx6q-apalis-ixora.dtb \
 	imx6q-apalis-ixora-v1.1.dtb \
@@ -472,12 +463,6 @@ dtb-$(CONFIG_SOC_IMX6Q) += \
 	imx6q-gw5903.dtb \
 	imx6q-gw5904.dtb \
 	imx6q-h100.dtb \
-	imx6q-hummingboard.dtb \
-	imx6q-hummingboard-emmc-som-v15.dtb \
-	imx6q-hummingboard-som-v15.dtb \
-	imx6q-hummingboard2.dtb \
-	imx6q-hummingboard2-emmc-som-v15.dtb \
-	imx6q-hummingboard2-som-v15.dtb \
 	imx6q-icore.dtb \
 	imx6q-icore-mipi.dtb \
 	imx6q-icore-ofcap10.dtb \
@@ -676,8 +661,6 @@ dtb-$(CONFIG_ARCH_OMAP3) += \
 	omap3-overo-summit.dtb \
 	omap3-overo-tobi.dtb \
 	omap3-overo-tobiduo.dtb \
-	omap3-pandora-600mhz.dtb \
-	omap3-pandora-1ghz.dtb \
 	omap3-sbc-t3517.dtb \
 	omap3-sbc-t3530.dtb \
 	omap3-sbc-t3730.dtb \
@@ -1205,5 +1188,165 @@ dtb-$(CONFIG_ARCH_ASPEED) += \
 	aspeed-bmc-opp-romulus.dtb \
 	aspeed-bmc-opp-witherspoon.dtb \
 	aspeed-bmc-opp-zaius.dtb \
-	aspeed-bmc-portwell-neptune.dtb \
-	aspeed-bmc-quanta-q71l.dtb
+	aspeed-bmc-portwell-neptune.dtb
+ifeq ($(CONFIG_MSTAR_CHIP),y)
+dtb-y += \
+	$(subst ",,$(CONFIG_MSTAR_CHIP_NAME)_an).dtb \
+	$(subst ",,$(CONFIG_MSTAR_CHIP_NAME)_ramdisk).dtb
+dtb-$(CONFIG_MSTAR_M5621) += \
+	m5621_an_avb.dtb \
+	m5621_an.main_dtb \
+	m5621_overlay_1.dtbo \
+	m5621_overlay_28.dtbo \
+	m5621_overlay_dp_28.dtbo \
+	m5621_overlay_avb28.dtbo \
+	m5621_overlay_dp_avb28.dtbo \
+	m5621_an_midgard.dtb
+dtb-$(CONFIG_MSTAR_M7322) += \
+	m7322_an_midgard.dtb \
+	m7322_148B.dtb \
+	m7322_303A.dtb \
+	m7322_an_avb.dtb
+dtb-$(CONFIG_MSTAR_M7632) += \
+	m7632_an_avb.dtb \
+	m7632_an.main_dtb \
+	m7632_overlay_28.dtbo \
+	m7632_overlay_avb28.dtbo \
+	m7632_an_midgard.dtb \
+	m7632_MediaTek_m7632_MTV19006.dtb \
+	m7632_MediaTek_m7632_MTV19008.dtb \
+	m7632_MediaTek_m7632_MT164B.dtb \
+	m7632_MediaTek_m7632_MT164B_avb.dtb \
+	m7632_MediaTek_m7632_MT164B_overlay_28.dtbo \
+	m7632_MediaTek_m7632_MT164B_overlay_avb28.dtbo \
+	m7632_MediaTek_m7632_MT164B_overlay_dp_28_ledblink.dtbo \
+	m7632_MediaTek_m7632_MT164B_overlay_dp_avb28.dtbo \
+	m7632_MediaTek_m7632_MT164B_overlay_dp_avb28_ledblink.dtbo \
+	m7632_MediaTek_m7632_MT164B_overlay_dp_ledblink.dtbo
+
+dtb-$(CONFIG_MSTAR_M7332) += \
+	m7332_an_avb.dtb \
+	m7332_an.main_dtb \
+	m7332_overlay.dtbo \
+	m7332_overlay_28.dtbo \
+	m7332_overlay_dp_28.dtbo \
+	m7332_overlay_avb28.dtbo \
+	m7332_overlay_dp_avb28.dtbo \
+	m7332_MediaTek_m7332_MT165B.dtb \
+	m7332_MediaTek_m7332_MT165B_20AT.dtb \
+	m7332_MediaTek_m7332_MT165B_20AT-1G.dtb \
+	m7332_MediaTek_m7332_MT168B.dtb \
+	m7332_MediaTek_m7332_MT168B_20AT.dtb \
+	m7332_MediaTek_m7332_MT169B-2K.dtb \
+	m7332_MediaTek_m7332_MT169B-4K.dtb \
+	m7332_MediaTek_m7332_MTV19007.dtb \
+	m7332_MediaTek_m7332_MTV19013.dtb \
+	m7332_MediaTek_m7332_MT165B_avb.dtb \
+	m7332_MediaTek_m7332_MT165B_overlay.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_28.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_avb28.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_avb.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_dp_28.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_dp_avb28.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_dp.dtbo \
+	m7332_MediaTek_m7332_MT168B_avb.dtb \
+	m7332_MediaTek_m7332_MT168B_20AT_avb.dtb \
+	m7332_MediaTek_m7332_MT168B_overlay.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_28.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_28.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_avb28.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_avb28.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_avb.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_avb.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_dp_28.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_dp_28.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_dp_avb28.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_dp_avb28.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_dp.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_dp.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_avb28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_avb_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_dp_28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_dp_avb28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_dp_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT165B_overlay_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_avb28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_avb28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_avb_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_avb_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_dp_28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_dp_28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_dp_avb28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_dp_avb28_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_dp_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_dp_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_overlay_ledblink.dtbo \
+	m7332_MediaTek_m7332_MT168B_20AT_overlay_ledblink.dtbo \
+	m7332_overlay_28_ledblink.dtbo \
+	m7332_overlay_avb28_ledblink.dtbo \
+	m7332_overlay_dp_28_ledblink.dtbo \
+	m7332_overlay_dp_avb28_ledblink.dtbo \
+	m7332_overlay_ledblink.dtbo 
+
+dtb-$(CONFIG_MSTAR_M7642) += \
+	m7642_MediaTek_m7642_MTV19020.dtb \
+	m7642_MediaTek_m7642_MTV19024.dtb \
+	m7642_MediaTek_m7642_MT166B.dtb \
+	m7642_an_midgard.dtb
+dtb-$(CONFIG_MSTAR_MT5862) += \
+        mt5862_an_avb.dtb \
+        mt5862_an.main_dtb \
+        mt5862_overlay_28.dtbo \
+        mt5862_overlay_avb28.dtbo
+
+dtb-$(CONFIG_MSTAR_MT5867) += \
+	mt5867_MediaTek_mt5867_MT5867-M1V1-B2.dtb \
+	mt5867_MediaTek_mt5867_MT5867-M2V1-N2.dtb \
+	mt5867_MediaTek_mt5867_MT5867-H1V1-B2.dtb \
+	mt5867_MediaTek_mt5867_MT5867-H2V1-N2.dtb \
+	mt5867_MediaTek_mt5867_MT5867-M1V1-B2_avb.dtb \
+	mt5867_MediaTek_mt5867_MT5867-M2V1-N2_avb.dtb \
+	mt5867_MediaTek_mt5867_MT5867-H1V1-B2_avb.dtb \
+	mt5867_MediaTek_mt5867_MT5867-H2V1-N2_avb.dtb \
+	mt5867_MediaTek_mt5867_MT5867-H1V1-B2_overlay_dp_avb28.dtbo\
+    mt5867_oneplus_Dubai_eu_MT5867-H1V1-B2_overlay_dp_avb28.dtbo\
+	mt5867_oneplus_Dubai_sa_MT5867-H1V1-B2_overlay_dp_avb28.dtbo\
+	mt5867_MediaTek_mt5867_MT5867-H2V1-N2_overlay_dp_avb28.dtbo\
+	mt5867_MediaTek_mt5867_MT5867-M1V1-B2_overlay_dp_avb28.dtbo\
+	mt5867_MediaTek_mt5867_MT5867-M2V1-N2_overlay_dp_avb28.dtbo\
+        mt5867_MediaTek_mt5867_MT5867-H1V1-B2_overlay_dp_avb28_ledblink.dtbo\
+        mt5867_MediaTek_mt5867_MT5867-H2V1-N2_overlay_dp_avb28_ledblink.dtbo\
+        mt5867_MediaTek_mt5867_MT5867-M2V1-N2_overlay_dp_avb28_ledblink.dtbo\
+	mt5867_an.main_dtb\
+	mt5867_overlay_28.dtb\
+	mt5867_overlay_avb.dtb\
+	mt5867_overlay_avb28.dtb\
+	mt5867_overlay_dp_28.dtb\
+	mt5867_overlay_dp_avb28.dtb\
+	mt5867_overlay_dto.dtb
+
+dtb-$(CONFIG_MSTAR_MT5889) += \
+	m7642_MediaTek_m7642_MTV19020.dtb \
+	mt5889_MediaTek_mt5889_MT5889-H1V1-B2-S.dtb \
+	mt5889_MediaTek_mt5889_MT5889-H2V1-B4-S.dtb \
+	mt5889_MediaTek_mt5889_MT5889-H2V1-B4-S_avb.dtb \
+	mt5889_an_avb.dtb \
+	mt5889_an.main_dtb \
+	mt5889_overlay_dp_avb28.dtbo \
+	mt5889_MediaTek_mt5889_MT5889-H2V1-B4-S_overlay_dp_28_ledblink.dtbo \
+	mt5889_MediaTek_mt5889_MT5889-H2V1-B4-S_overlay_dp_avb28.dtbo \
+	mt5889_MediaTek_mt5889_MT5889-H2V1-B4-S_overlay_dp_avb28_ledblink.dtbo \
+	mt5889_MediaTek_mt5889_MT5889-H2V1-B4-S_overlay_dp_ledblink.dtbo \
+	mt5889_overlay_avb28.dtbo
+
+dtb-$(CONFIG_MSTAR_MT5872) += \
+	mt5872_MediaTek_mt5872_MT5872-H1V1-B2-S.dtb \
+	mt5872_MediaTek_mt5872_MT5872-H2V1-B2-S.dtb \
+	mt5872_MediaTek_mt5872_MT5872-M1V1-B2.dtb \
+	mt5872_MediaTek_mt5872_MT5872-M2V1-B2.dtb
+
+endif

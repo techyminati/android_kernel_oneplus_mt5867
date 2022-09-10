@@ -184,6 +184,10 @@ static inline unsigned long global_zone_page_state(enum zone_stat_item item)
 	return x;
 }
 
+#ifndef global_page_state
+#define global_page_state global_zone_page_state
+#endif
+
 static inline unsigned long global_node_page_state(enum node_stat_item item)
 {
 	long x = atomic_long_read(&vm_node_stat[item]);

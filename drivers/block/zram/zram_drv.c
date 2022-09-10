@@ -33,16 +33,51 @@
 #include <linux/sysfs.h>
 #include <linux/debugfs.h>
 #include <linux/cpuhotplug.h>
-
 #include "zram_drv.h"
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+#include <linux/swap.h>
+#endif
+#include <linux/lzo.h>
+#include <linux/crypto.h>
+#ifdef CONFIG_MP_MZCCMDQ_HW
+#include "mdrv_mzc_drv.h"
+#include <linux/ktime.h>
+#endif
+
+#ifdef CONFIG_MP_MZCCMDQ_HW_SPLIT
+extern DEFINE_PER_CPU(unsigned long, addr1);
+extern DEFINE_PER_CPU(unsigned long, addr2);
+extern DEFINE_PER_CPU(bool, dec_is_mzc);
+#endif
+
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+static atomic_t enter_idx;
+static atomic_t leave_idx;
+static atomic_t r_idx, w_idx;
+inline unsigned long long timediff (struct timeval begin, struct timeval end)
+{
+	return ((end.tv_sec - begin.tv_sec) * 1000000 + (end.tv_usec - begin.tv_usec));
+}
+extern unsigned long long duration_enc, duration_dec;
+#endif
+#if defined(CONFIG_MP_MZCCMDQ_HW)
+extern bool MZC_ready;
+bool MZC_now = true;
+#endif
+
 
 static DEFINE_IDR(zram_index_idr);
 /* idr index must be protected */
 static DEFINE_MUTEX(zram_index_mutex);
 
 static int zram_major;
+#if defined(CONFIG_MP_MZCCMDQ_HYBRID_HW)
+static const char *default_compressor = "mzc_hybrid";
+#elif defined(CONFIG_MP_MZCCMDQ_HW)
+static const char *default_compressor = "mzc";
+#else
 static const char *default_compressor = "lzo";
-
+#endif
 /* Module params (documentation at end) */
 static unsigned int num_devices = 1;
 /*
@@ -50,6 +85,7 @@ static unsigned int num_devices = 1;
  * uncompressed in memory.
  */
 static size_t huge_class_size;
+
 
 static void zram_free_page(struct zram *zram, size_t index);
 static int zram_bvec_read(struct zram *zram, struct bio_vec *bvec,
@@ -134,6 +170,7 @@ static void zram_set_obj_size(struct zram *zram,
 	zram->table[index].flags = (flags << ZRAM_FLAG_SHIFT) | size;
 }
 
+
 static inline bool zram_allocated(struct zram *zram, u32 index)
 {
 	return zram_get_obj_size(zram, index) ||
@@ -151,6 +188,10 @@ static inline bool is_partial_io(struct bio_vec *bvec)
 {
 	return false;
 }
+#endif
+
+#ifdef CONFIG_MP_ZSM
+#include "zram_merge.h"
 #endif
 
 /*
@@ -263,6 +304,15 @@ static ssize_t mem_limit_store(struct device *dev,
 	return len;
 }
 
+#ifdef CONFIG_MP_ZSM
+static ssize_t zsm_on_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct zram *zram = dev_to_zram(dev);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", zram->zsm_on);
+}
+#endif
+
 static ssize_t mem_used_max_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len)
 {
@@ -292,7 +342,6 @@ static ssize_t idle_store(struct device *dev,
 	int index;
 	char mode_buf[8];
 	ssize_t sz;
-
 	sz = strscpy(mode_buf, buf, sizeof(mode_buf));
 	if (sz <= 0)
 		return -EINVAL;
@@ -326,6 +375,63 @@ static ssize_t idle_store(struct device *dev,
 
 	return len;
 }
+
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+static ssize_t collision_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct zram *zram = dev_to_zram(dev);
+	int i;
+
+    for(i = 0; i < 10; i++)
+        printk("%d task collision: %llu\n", i, atomic64_read(&zram->stats.collision[i]));
+    printk("%6c %6d %6d %6d %6d %6d %6d %6d %6d %6d %6d\n", 'W', 0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+    printk("===============================================\n");
+    for(i = 0; i < 10; i++) {
+        printk("R %4d | %6llu %6llu %6llu %6llu %6llu %6llu %6llu %6llu %6llu %6llu\n", i,
+               atomic64_read(&zram->stats.rw_collision[i][0]),
+               atomic64_read(&zram->stats.rw_collision[i][1]),
+               atomic64_read(&zram->stats.rw_collision[i][2]),
+               atomic64_read(&zram->stats.rw_collision[i][3]),
+               atomic64_read(&zram->stats.rw_collision[i][4]),
+               atomic64_read(&zram->stats.rw_collision[i][5]),
+               atomic64_read(&zram->stats.rw_collision[i][6]),
+               atomic64_read(&zram->stats.rw_collision[i][7]),
+               atomic64_read(&zram->stats.rw_collision[i][8]),
+               atomic64_read(&zram->stats.rw_collision[i][9])
+              );
+    }
+    return 0;
+}
+
+static ssize_t all_performance_info_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct zram *zram = dev_to_zram(dev);
+#ifdef CONFIG_MP_MZCCMDQ_HW
+	if (MZC_now) {
+		MDrv_ldec_cycle_info();
+		MDrv_lenc_cycle_info();
+	}
+#endif
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	printk("zram total number of hybrid hw times       %llu \n",atomic64_read(&zram->stats.num_hybrid_hw));
+#endif
+	printk("zram total number of kswapd write times    %llu \n",atomic64_read(&zram->stats.num_kswapd));
+	printk("zram total number of write times           %llu \n",atomic64_read(&zram->stats.num_writes));
+	printk("zram total write time                      %llu \n",atomic64_read(&zram->stats.write_time));
+	printk("zram total number of read times            %llu \n",atomic64_read(&zram->stats.num_reads));
+	printk("zram total read time                       %llu \n",atomic64_read(&zram->stats.read_time));
+	printk("zram total number of compression times     %llu \n",atomic64_read(&zram->stats.num_compression));
+	printk("zram total compression time                %llu \n",atomic64_read(&zram->stats.compression_time));
+	printk("zram total compression time wo collision   %llu \n",atomic64_read(&zram->stats.compression_time_wo_collision));
+	printk("zram total number of decompression times   %llu \n",atomic64_read(&zram->stats.num_decompression));
+	printk("zram total decompression time              %llu \n",atomic64_read(&zram->stats.decompression_time));
+	printk("zram total decompression time wo collision %llu \n",atomic64_read(&zram->stats.decompression_time_wo_collision));
+	return 0;
+}
+static DEVICE_ATTR_RO(all_performance_info);
+#endif
 
 #ifdef CONFIG_ZRAM_WRITEBACK
 static ssize_t writeback_limit_enable_store(struct device *dev,
@@ -1026,6 +1132,12 @@ static ssize_t comp_algorithm_store(struct device *dev,
 	}
 
 	strcpy(zram->compressor, compressor);
+#if defined(CONFIG_MP_MZCCMDQ_HW)
+	if (strstr(compressor,"mzc"))
+		MZC_now = true;
+	else
+		MZC_now = false;
+#endif
 	up_write(&zram->init_lock);
 	return len;
 }
@@ -1064,6 +1176,133 @@ static ssize_t io_stat_show(struct device *dev,
 
 	return ret;
 }
+
+#ifdef CONFIG_MP_ZSM
+static ssize_t zsm_idx_rb_verify_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct zram *zram = dev_to_zram(dev);
+	ssize_t ret;
+	int ret_non4KB, ret_4KB;
+	/* non4KB */
+	int index;
+	for (index = 0; index < ZSM_Compr_TREE_COUNT; index++) {
+		zsm_lock_tree(&zram->tree_lock_Compr[index]);
+		ret_non4KB = idx_rb_verify_rules(&zram->tree_root_Compr[index]);
+		zsm_unlock_tree(&zram->tree_lock_Compr[index]);
+	}
+	/* 4KB */
+	zsm_lock_tree(&zram->tree_lock_nCompr);
+	ret_4KB = idx_rb_verify_rules(&zram->tree_root_nCompr);
+	zsm_unlock_tree(&zram->tree_lock_nCompr);
+	if (ret_non4KB == IDX_RB_VERIFY_SUCCESS &&
+			ret_4KB == IDX_RB_VERIFY_SUCCESS) {
+		ret = scnprintf(buf, PAGE_SIZE,"ZSM: IDX_RB_TREE Verification"
+				" [Successfully] for all idx_rb_tree\n");
+	} else {
+		ret = scnprintf(buf, PAGE_SIZE, "ZSM: IDX_RB_TREE Verification"
+				" [Failed]\n");
+	}
+	return ret;
+}
+#endif
+
+#ifdef CONFIG_MP_ZSM_STAT
+static ssize_t zsm_stat_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct zram *zram = dev_to_zram(dev);
+	struct zs_pool_stats pool_stats;
+	u64 mem_used = 0;
+	ssize_t ret;
+	/* zsm static statistics */
+	u64 orig_page_cnt;
+	u64 real_Compr_pg_cnt;
+	u64 real_nCompr_pg_cnt;
+	u64 real_total_pg_cnt;
+	u64 real_total_compr_size;
+	u64 real_Compr_size;
+	u64 real_nCompr_size;
+	u64 zsm_total_saved_page_cnt;
+	u64 zsm_saved_Compr_pg_cnt;
+	u64 zsm_saved_nCompr_pg_cnt;
+	u64 zsm_saved_total_Compr_size;
+    u64 zsm_saved_Compr_sz;
+    u64 zsm_saved_nCompr_sz;
+	u64 zram_same_cnt;
+
+	memset(&pool_stats, 0x00, sizeof(struct zs_pool_stats));
+
+	down_read(&zram->init_lock);
+	if (init_done(zram)) {
+		mem_used = zs_get_total_pages(zram->mem_pool);
+		zs_pool_stats(zram->mem_pool, &pool_stats);
+	}
+	/* page count */
+	zram_same_cnt = atomic64_read(&zram->stats.same_pages);
+	orig_page_cnt = atomic64_read(&zram->stats.pages_stored);
+	real_Compr_pg_cnt = atomic64_read(&zram->stats.real_Compr_pg_cnt);
+	real_nCompr_pg_cnt = atomic64_read(&zram->stats.real_nCompr_pg_cnt);
+	real_total_pg_cnt = real_Compr_pg_cnt + real_nCompr_pg_cnt;
+    zsm_saved_Compr_pg_cnt = atomic64_read(
+			&zram->stats.zsm_saved_Compr_pg_cnt);
+    zsm_saved_nCompr_pg_cnt = 
+		atomic64_read(&zram->stats.zsm_saved_nCompr_pg_cnt);
+	zsm_total_saved_page_cnt = zsm_saved_Compr_pg_cnt +
+		zsm_saved_nCompr_pg_cnt;
+	/* size */
+	real_total_compr_size = (u64)atomic64_read(&zram->stats.compr_data_size);
+	real_nCompr_size = real_nCompr_pg_cnt * PAGE_SIZE;
+	real_Compr_size = real_total_compr_size - real_nCompr_size;
+    zsm_saved_Compr_sz = atomic64_read(&zram->stats.zsm_saved_Compr_sz);
+    zsm_saved_nCompr_sz = atomic64_read(&zram->stats.zsm_saved_nCompr_sz);
+	zsm_saved_total_Compr_size = zsm_saved_Compr_sz + zsm_saved_nCompr_sz;
+	if ((real_total_pg_cnt + zsm_total_saved_page_cnt + zram_same_cnt) 
+			!= orig_page_cnt) {
+		pr_alert("------------------------------------------\n");
+		pr_alert("[ZSM_STAT] stat (page count) is wrong.\n"
+				"May be the numbers are not updated yet.\n");
+		pr_alert("real_total_pg_cnt=%llu; zsm_total_saved_page_cnt=%llu; "
+				"zram_same_cnt=%llu; orig_page_cnt=%llu;\n",
+				real_total_pg_cnt, zsm_total_saved_page_cnt, zram_same_cnt,
+				orig_page_cnt);
+		pr_alert("------------------------------------------\n");
+	}
+	ret = scnprintf(buf, PAGE_SIZE,
+            "ZRAM:\n"
+			"%14s %14s %14s %14s %14s %14s\n"
+			"Real stat(with ZSM):\n"
+			"%14llu %14llu %14llu %14llu %14llu %14llu\n"
+			"ZSM stat (SAVED):\n"
+			"%14llu %14llu %14llu %14llu %14llu %14llu\n"
+			"Original stat (without ZSM):\n"
+			"%14llu %14llu %14llu %14llu %14llu %14llu\n"
+			"ZRAM_SAME: %llu\n",
+			/* labels */
+			"total_PgCnt", "Compr_PgCnt", "nonCompr_PgCnt",
+			"Compr_size", "Compr_size", "nonCompr_size",
+			/* Real stat */
+			real_total_pg_cnt, real_Compr_pg_cnt, real_nCompr_pg_cnt,
+			real_total_compr_size, real_Compr_size, real_nCompr_size,
+			/* ZSM stat */
+			zsm_total_saved_page_cnt, zsm_saved_Compr_pg_cnt, 
+			zsm_saved_nCompr_pg_cnt, zsm_saved_total_Compr_size,
+			zsm_saved_Compr_sz, zsm_saved_nCompr_sz,
+			/* Original stat*/
+			orig_page_cnt,
+			real_Compr_pg_cnt + zsm_saved_Compr_pg_cnt,
+			real_nCompr_pg_cnt + zsm_saved_nCompr_pg_cnt,
+			real_total_compr_size + zsm_saved_total_Compr_size,
+			real_Compr_size + zsm_saved_Compr_sz,
+			real_nCompr_size + zsm_saved_nCompr_sz,
+			/* ZRAM_SAME */
+			zram_same_cnt
+			);
+	up_read(&zram->init_lock);
+
+	return ret;
+}
+#endif
 
 static ssize_t mm_stat_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -1167,14 +1406,43 @@ static bool zram_meta_alloc(struct zram *zram, u64 disksize)
 	if (!zram->table)
 		return false;
 
+#ifdef CONFIG_MP_ZSM
+	u32 idx;
+    for (idx = 0; idx < ZSM_Compr_TREE_COUNT; idx++) {
+		zsm_init_tree_lock(&zram->tree_lock_Compr[idx]);
+	}
+    zsm_init_tree_lock(&zram->tree_lock_nCompr);
+	pr_err("[ZSM] entry size = %zu*%zu (B) = %zu (KB)\n",
+			sizeof(struct zram_table_entry), num_pages,
+			(sizeof(struct zram_table_entry)*num_pages) >> 10);
+    if (num_pages > (idx_rb_last_avail_idx + 1)) {
+        pr_err("[ZSM] indices left for links is not enough.\n");
+        pr_alert("[ZSM] The maximum zram size with ZSM is %u pages\n",
+				(u32)(idx_rb_last_avail_idx + 1));
+        BUG_ON(1);
+    }
+    for (idx = 0; idx < num_pages; idx++) {
+        zsm_set_crc_next(zram, idx, idx);
+    } 
+	/* 4k and non4k idx_rbtree share the same table */
+	for (idx = 0; idx < ZSM_Compr_TREE_COUNT; idx++) {
+		zram->tree_root_Compr[idx] = IDX_RB_ROOT(zram->table,
+				struct zram_table_entry, _idx_rb_node);
+	}
+	zram->tree_root_nCompr = IDX_RB_ROOT(zram->table, struct zram_table_entry,
+			_idx_rb_node);
+#endif
+
 	zram->mem_pool = zs_create_pool(zram->disk->disk_name);
 	if (!zram->mem_pool) {
 		vfree(zram->table);
 		return false;
 	}
 
+	printk("[1]huge_class_size = %zu\n", huge_class_size);
 	if (!huge_class_size)
 		huge_class_size = zs_huge_class_size(zram->mem_pool);
+	printk("[2]huge_class_size = %zu\n", huge_class_size);
 	return true;
 }
 
@@ -1185,6 +1453,9 @@ static bool zram_meta_alloc(struct zram *zram, u64 disksize)
  */
 static void zram_free_page(struct zram *zram, size_t index)
 {
+#ifdef CONFIG_MP_ZSM_DEBUG
+	zsm_record_history(zram, index, "Before Free.");
+#endif
 	unsigned long handle;
 
 #ifdef CONFIG_ZRAM_MEMORY_TRACKING
@@ -1218,16 +1489,45 @@ static void zram_free_page(struct zram *zram, size_t index)
 	if (!handle)
 		return;
 
+#ifdef CONFIG_MP_ZSM
+	int ret = -1;
+	if (zram->zsm_on) {
+		ret = zsm_info_cleanup(zram, index, zram->tree_lock_Compr,
+				zram->tree_root_Compr, &zram->tree_lock_nCompr,
+				&zram->tree_root_nCompr);
+	}
+    if (ret == 0 || !zram->zsm_on) {
+        zs_free(zram->mem_pool, handle);
+		atomic64_sub(zram_get_obj_size(zram, index),
+				&zram->stats.compr_data_size);
+#ifdef CONFIG_MP_ZSM_STAT
+		if (zram_get_obj_size(zram, index) == PAGE_SIZE) {
+			atomic64_dec(&zram->stats.real_nCompr_pg_cnt);
+		} else {
+			atomic64_dec(&zram->stats.real_Compr_pg_cnt);
+		}
+#endif
+    }
+#else
 	zs_free(zram->mem_pool, handle);
 
 	atomic64_sub(zram_get_obj_size(zram, index),
 			&zram->stats.compr_data_size);
+#endif
 out:
 	atomic64_dec(&zram->stats.pages_stored);
 	zram_set_handle(zram, index, 0);
 	zram_set_obj_size(zram, index, 0);
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	WARN_ON_ONCE(zram->table[index].flags &
+		~(1UL << ZRAM_LOCK | 1UL << ZRAM_UNDER_WB | 1UL << ZRAM_IS_MZC));
+#else
 	WARN_ON_ONCE(zram->table[index].flags &
 		~(1UL << ZRAM_LOCK | 1UL << ZRAM_UNDER_WB));
+#endif
+#ifdef CONFIG_MP_ZSM_DEBUG
+	zsm_record_history(zram, index, "After Free-W/ H");
+#endif
 }
 
 static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
@@ -1237,7 +1537,9 @@ static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
 	unsigned long handle;
 	unsigned int size;
 	void *src, *dst;
-
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+	struct timeval decompress_begin,decompress_end;
+#endif
 	zram_slot_lock(zram, index);
 	if (zram_test_flag(zram, index, ZRAM_WB)) {
 		struct bio_vec bvec;
@@ -1267,7 +1569,12 @@ static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
 
 	size = zram_get_obj_size(zram, index);
 
-	src = zs_map_object(zram->mem_pool, handle, ZS_MM_RO);
+#ifdef CONFIG_MP_MZCCMDQ_HW_SPLIT
+	bool *is_mzc = &get_cpu_var(dec_is_mzc);
+	*is_mzc = zram_test_flag(zram, index, ZRAM_IS_MZC);
+	put_cpu_var(dec_is_mzc);
+#endif
+    src = zs_map_object(zram->mem_pool, handle, ZS_MM_RO);
 	if (size == PAGE_SIZE) {
 		dst = kmap_atomic(page);
 		memcpy(dst, src, PAGE_SIZE);
@@ -1275,9 +1582,41 @@ static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
 		ret = 0;
 	} else {
 		struct zcomp_strm *zstrm = zcomp_stream_get(zram->comp);
-
 		dst = kmap_atomic(page);
-		ret = zcomp_decompress(zstrm, src, size, dst);
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+		atomic64_inc(&zram->stats.num_decompression);
+		do_gettimeofday(&decompress_begin);
+#endif
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+		zstrm->tfm->base.is_mzc = zram_test_flag(zram, index, ZRAM_IS_MZC);
+#endif
+#ifdef CONFIG_MP_MZCCMDQ_HW_SPLIT
+		if (!src)
+		{
+			unsigned long  in_addr1 = get_cpu_var(addr1);
+			unsigned long in_addr2 = get_cpu_var(addr2);
+			zstrm->tfm->base.addr1 = in_addr1;
+			zstrm->tfm->base.addr2 = in_addr2;
+			put_cpu_var(addr1);
+			put_cpu_var(addr2);
+
+		}
+#endif
+    	ret = zcomp_decompress(zstrm, src, size, dst);
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+		do_gettimeofday(&decompress_end);
+		atomic64_add(timediff(decompress_begin,decompress_end),&zram->stats.decompression_time);
+#if defined(CONFIG_MP_MZCCMDQ_HYBRID_HW)
+		if (MZC_now && zstrm->tfm->base.is_mzc)
+			atomic64_add(duration_dec,&zram->stats.decompression_time_wo_collision);
+		else
+#elif defined(CONFIG_MP_MZCCMDQ_HW)
+		if (MZC_now)
+			atomic64_add(duration_dec,&zram->stats.decompression_time_wo_collision);
+		else
+#endif
+		atomic64_add(timediff(decompress_begin,decompress_end),&zram->stats.decompression_time_wo_collision);
+#endif
 		kunmap_atomic(dst);
 		zcomp_stream_put(zram->comp);
 	}
@@ -1335,11 +1674,30 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
 	struct zcomp_strm *zstrm;
 	struct page *page = bvec->bv_page;
 	unsigned long element = 0;
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	int orig_algo = INITIAL_VALUE;
+#endif
 	enum zram_pageflags flags = 0;
+#ifdef CONFIG_MP_ZSM
+    u32 checksum = 0;
+	zsm_tree_lock *tree_lock = NULL;
+	struct idx_rb_root *tree_root = NULL;
+	struct zsm_connect search_results;
+	bool alloc_twice_succ = false;
+#endif
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+	struct timeval compress_begin,compress_end;
+#endif
 
 	mem = kmap_atomic(page);
 	if (page_same_filled(mem, &element)) {
 		kunmap_atomic(mem);
+#ifdef CONFIG_MP_ZSM
+		zram_slot_lock(zram, index);
+		/* remove ZSM info */
+		zram_free_page(zram, index);
+		zram_slot_unlock(zram, index);
+#endif
 		/* Free memory associated with this sector now. */
 		flags = ZRAM_SAME;
 		atomic64_inc(&zram->stats.same_pages);
@@ -1350,9 +1708,45 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
 compress_again:
 	zstrm = zcomp_stream_get(zram->comp);
 	src = kmap_atomic(page);
-	ret = zcomp_compress(zstrm, src, &comp_len);
-	kunmap_atomic(src);
-
+	void *orig_src = src;
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+    atomic64_inc(&zram->stats.num_compression);
+	do_gettimeofday(&compress_begin);
+#endif
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+    if (MZC_now) {
+	    if (!handle)
+    	    zstrm->tfm->base.is_mzc = INITIAL_VALUE;
+        else
+    	    zstrm->tfm->base.is_mzc = orig_algo;
+    }
+    else
+        zstrm->tfm->base.is_mzc = 0;
+#endif
+    ret = zcomp_compress(zstrm, src, &comp_len);
+#ifdef CONFIG_MP_ZSM
+	checksum = zstrm->tfm->base.crc32;
+#endif
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	if (!handle)
+		orig_algo = zstrm->tfm->base.is_mzc;
+#endif
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+	do_gettimeofday(&compress_end);
+	atomic64_add(timediff(compress_begin,compress_end),&zram->stats.compression_time);
+#if defined(CONFIG_MP_MZCCMDQ_HYBRID_HW)
+	if (MZC_now && zstrm->tfm->base.is_mzc) {
+		atomic64_add(duration_enc,&zram->stats.compression_time_wo_collision);
+		atomic64_inc(&zram->stats.num_hybrid_hw);
+	} else
+#elif defined(CONFIG_MP_MZCCMDQ_HW)
+	if (MZC_now)
+		atomic64_add(duration_enc,&zram->stats.compression_time_wo_collision);
+	else
+#endif
+	atomic64_add(timediff(compress_begin,compress_end),&zram->stats.compression_time_wo_collision);
+#endif
+	kunmap_atomic(orig_src);
 	if (unlikely(ret)) {
 		zcomp_stream_put(zram->comp);
 		pr_err("Compression failed! err=%d\n", ret);
@@ -1362,6 +1756,46 @@ compress_again:
 
 	if (comp_len >= huge_class_size)
 		comp_len = PAGE_SIZE;
+#ifdef CONFIG_MP_ZSM
+	if (!zram->zsm_on)
+		goto zsm_skip_search;
+	if (unlikely(handle)) {
+		/* come from slow-path of zs_malloc() with handle */
+		alloc_twice_succ = true;
+		goto zsm_skip_search;
+	}
+
+	if (unlikely(comp_len >= huge_class_size)) {
+		tree_root = &zram->tree_root_nCompr;
+		tree_lock = &zram->tree_lock_nCompr;
+	} else {
+		tree_root = &zram->tree_root_Compr[zsm_select_compr_tree(comp_len)];
+		tree_lock = &zram->tree_lock_Compr[zsm_select_compr_tree(comp_len)];
+	}
+
+	zram_slot_lock(zram, index);
+	/* zsm move this zram_free_page beforehand to maintain the zsm info */
+	zram_free_page(zram, index);
+	zram_zsm_entry_init(zram, index, checksum, comp_len);
+	zram_slot_unlock(zram, index);
+
+	zsm_connect_init(&search_results);
+	zsm_lock_tree(tree_lock);
+	int zsm_search_ret;
+	zsm_search_ret = search_page_in_zsm_info(bvec, zram, index, zstrm->buffer,
+			checksum, comp_len, page, tree_root, &search_results,
+			huge_class_size);
+	if (unlikely(zsm_search_ret)) {
+		/* found same page */
+		insert_page_in_zsm_info(bvec, zram, index, orig_src, checksum, comp_len,
+				page, tree_root, &search_results);
+		zsm_unlock_tree(tree_lock);
+		zcomp_stream_put(zram->comp);
+		ret = 0;
+		goto zsm_found_out;
+	}
+zsm_skip_search:
+#endif
 	/*
 	 * handle allocation has 2 paths:
 	 * a) fast path is executed with preemption disabled (for
@@ -1382,6 +1816,11 @@ compress_again:
 				__GFP_HIGHMEM |
 				__GFP_MOVABLE);
 	if (!handle) {
+#ifdef CONFIG_MP_ZSM
+		if (zram->zsm_on) {
+			zsm_unlock_tree(tree_lock);
+		}
+#endif
 		zcomp_stream_put(zram->comp);
 		atomic64_inc(&zram->stats.writestall);
 		handle = zs_malloc(zram->mem_pool, comp_len,
@@ -1389,6 +1828,9 @@ compress_again:
 				__GFP_MOVABLE);
 		if (handle)
 			goto compress_again;
+#ifdef CONFIG_MP_ZSM_DEBUG
+		zsm_record_history(zram, index, "2 zsmalloc fail");
+#endif
 		return -ENOMEM;
 	}
 
@@ -1396,11 +1838,22 @@ compress_again:
 	update_used_max(zram, alloced_pages);
 
 	if (zram->limit_pages && alloced_pages > zram->limit_pages) {
+#ifdef CONFIG_MP_ZSM
+		if (likely(zram->zsm_on && !alloc_twice_succ)) {
+			zsm_unlock_tree(tree_lock);
+		}
+#endif
 		zcomp_stream_put(zram->comp);
 		zs_free(zram->mem_pool, handle);
 		return -ENOMEM;
 	}
-
+#ifdef CONFIG_MP_ZSM
+	if (zram->zsm_on && !alloc_twice_succ) {
+		insert_page_in_zsm_info(bvec, zram, index, NULL, checksum, comp_len,
+				page, tree_root, &search_results);
+		zsm_unlock_tree(tree_lock);
+	}
+#endif
 	dst = zs_map_object(zram->mem_pool, handle, ZS_MM_WO);
 
 	src = zstrm->buffer;
@@ -1413,14 +1866,30 @@ compress_again:
 	zcomp_stream_put(zram->comp);
 	zs_unmap_object(zram->mem_pool, handle);
 	atomic64_add(comp_len, &zram->stats.compr_data_size);
+#ifdef CONFIG_MP_ZSM_STAT
+	if (comp_len == PAGE_SIZE) {
+		atomic64_inc(&zram->stats.real_nCompr_pg_cnt);
+	} else {
+		atomic64_inc(&zram->stats.real_Compr_pg_cnt);
+	}
+#endif
 out:
 	/*
 	 * Free memory associated with this sector
 	 * before overwriting unused sectors.
 	 */
 	zram_slot_lock(zram, index);
+#ifdef CONFIG_MP_ZSM
+	if (!zram->zsm_on)
+#endif
 	zram_free_page(zram, index);
-
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW	
+	if (orig_algo == MZC) {
+		zram_set_flag(zram, index, ZRAM_IS_MZC);
+	} else {
+		zram_clear_flag(zram, index, ZRAM_IS_MZC);
+	}
+#endif
 	if (comp_len == PAGE_SIZE) {
 		zram_set_flag(zram, index, ZRAM_HUGE);
 		atomic64_inc(&zram->stats.huge_pages);
@@ -1432,9 +1901,21 @@ out:
 	}  else {
 		zram_set_handle(zram, index, handle);
 		zram_set_obj_size(zram, index, comp_len);
+#ifdef CONFIG_MP_ZSM
+		if (zram->zsm_on && !alloc_twice_succ) {
+			zsm_lock_tree(tree_lock);
+			zsm_set_link_flag(zram, index, ZRAM_ZSM_DONE_NODE);
+			zsm_unlock_tree(tree_lock);
+		}
+#endif
 	}
+#ifdef CONFIG_MP_ZSM_DEBUG
+	zsm_record_history(zram, index, "After Set.");
+#endif
 	zram_slot_unlock(zram, index);
-
+#ifdef CONFIG_MP_ZSM
+zsm_found_out:
+#endif
 	/* Update stats */
 	atomic64_inc(&zram->stats.pages_stored);
 	return ret;
@@ -1443,6 +1924,9 @@ out:
 static int zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
 				u32 index, int offset, struct bio *bio)
 {
+#ifdef CONFIG_MP_ZSM_DEBUG
+	zsm_record_history(zram, index, "Before Write.");
+#endif
 	int ret;
 	struct page *page = NULL;
 	void *src;
@@ -1478,6 +1962,9 @@ static int zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
 out:
 	if (is_partial_io(bvec))
 		__free_page(page);
+#ifdef CONFIG_MP_ZSM_DEBUG
+	zsm_record_history(zram, index, "After Write.");
+#endif
 	return ret;
 }
 
@@ -1530,21 +2017,68 @@ static int zram_bvec_rw(struct zram *zram, struct bio_vec *bvec, u32 index,
 	unsigned long start_time = jiffies;
 	struct request_queue *q = zram->disk->queue;
 	int ret;
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+	struct timeval write_begin,write_end,read_begin,read_end;
+	int enter, leave, read, write;
+    atomic_inc(&enter_idx);
+    if (op_is_write(op))
+        atomic_inc(&w_idx);
+    else
+        atomic_inc(&r_idx);
 
+    enter = atomic_read(&enter_idx);
+    leave = atomic_read(&leave_idx);
+
+    if ((enter - leave) < MAX_COLLISION) {
+        atomic64_inc(&zram->stats.collision[enter-leave-1]);
+    } else {
+        printk("[ERR][ZRAM] enter=%d, leave=%d\n", enter, leave);
+    }
+
+    read = atomic_read(&r_idx);
+    write = atomic_read(&w_idx);
+    if (read < MAX_COLLISION && write < MAX_COLLISION) {
+        atomic64_inc(&zram->stats.rw_collision[read][write]);
+    } else {
+        printk("[ERR][ZRAM] read=%d, write=%d\n", read, write);
+    }
+	if (current_is_kswapd())
+		atomic64_inc(&zram->stats.num_kswapd);
+#endif
 	generic_start_io_acct(q, op, bvec->bv_len >> SECTOR_SHIFT,
 			&zram->disk->part0);
 
 	if (!op_is_write(op)) {
 		atomic64_inc(&zram->stats.num_reads);
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+		do_gettimeofday(&read_begin);
+#endif
 		ret = zram_bvec_read(zram, bvec, index, offset, bio);
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+		do_gettimeofday(&read_end);
+		atomic64_add(timediff(read_begin,read_end),&zram->stats.read_time);
+#endif
 		flush_dcache_page(bvec->bv_page);
 	} else {
 		atomic64_inc(&zram->stats.num_writes);
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+		do_gettimeofday(&write_begin);
+#endif
 		ret = zram_bvec_write(zram, bvec, index, offset, bio);
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+		do_gettimeofday(&write_end);
+		atomic64_add(timediff(write_begin,write_end),&zram->stats.write_time);
+#endif
 	}
 
 	generic_end_io_acct(q, op, &zram->disk->part0, start_time);
-
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+	if (op_is_write(op))
+        atomic_dec(&w_idx);
+    else
+        atomic_dec(&r_idx);
+	atomic_inc(&leave_idx);
+#endif
 	zram_slot_lock(zram, index);
 	zram_accessed(zram, index);
 	zram_slot_unlock(zram, index);
@@ -1555,7 +2089,6 @@ static int zram_bvec_rw(struct zram *zram, struct bio_vec *bvec, u32 index,
 		else
 			atomic64_inc(&zram->stats.failed_writes);
 	}
-
 	return ret;
 }
 
@@ -1638,7 +2171,6 @@ static void zram_slot_free_notify(struct block_device *bdev,
 		atomic64_inc(&zram->stats.miss_free);
 		return;
 	}
-
 	zram_free_page(zram, index);
 	zram_slot_unlock(zram, index);
 }
@@ -1723,6 +2255,26 @@ static void zram_reset_device(struct zram *zram)
 	reset_bdev(zram);
 }
 
+#ifdef CONFIG_MP_ZSM
+static ssize_t zsm_on_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t len)
+{
+	struct zram *zram = dev_to_zram(dev);
+	unsigned long long in;
+	in = memparse(buf, NULL);
+	if (!init_done(zram)) {
+		if (in == 1) {
+			zram->zsm_on = true;
+		} else {
+			zram->zsm_on = false;
+		}
+	} else {
+		pr_alert("[ZRAM] ZSM cannot be enabled after ZRAM disksize is set\n");
+	}
+	return len;
+}
+#endif
+
 static ssize_t disksize_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len)
 {
@@ -1761,6 +2313,9 @@ static ssize_t disksize_store(struct device *dev,
 	set_capacity(zram->disk, zram->disksize >> SECTOR_SHIFT);
 
 	revalidate_disk(zram->disk);
+#ifdef CONFIG_MP_ZSM
+	zsm_validate_algo(zram);
+#endif
 	up_write(&zram->init_lock);
 
 	return len;
@@ -1854,6 +2409,13 @@ static DEVICE_ATTR_WO(writeback);
 static DEVICE_ATTR_RW(writeback_limit);
 static DEVICE_ATTR_RW(writeback_limit_enable);
 #endif
+#ifdef CONFIG_MP_ZSM
+static DEVICE_ATTR_RO(zsm_idx_rb_verify);
+static DEVICE_ATTR_RW(zsm_on);
+#endif
+#ifdef CONFIG_MP_ZSM_STAT
+static DEVICE_ATTR_RO(zsm_stat);
+#endif
 
 static struct attribute *zram_disk_attrs[] = {
 	&dev_attr_disksize.attr,
@@ -1877,6 +2439,16 @@ static struct attribute *zram_disk_attrs[] = {
 	&dev_attr_bd_stat.attr,
 #endif
 	&dev_attr_debug_stat.attr,
+#ifdef CONFIG_MP_ZSM
+	&dev_attr_zsm_idx_rb_verify.attr,
+	&dev_attr_zsm_on.attr,
+#endif
+#ifdef CONFIG_MP_ZSM_STAT
+	&dev_attr_zsm_stat.attr,
+#endif
+#ifdef CONFIG_MP_ZRAM_PERFORMANCE
+	&dev_attr_all_performance_info.attr,
+#endif
 	NULL,
 };
 
@@ -1912,6 +2484,21 @@ static int zram_add(void)
 #ifdef CONFIG_ZRAM_WRITEBACK
 	spin_lock_init(&zram->wb_limit_lock);
 #endif
+#ifdef CONFIG_MP_ZSM
+	if (PAGE_SIZE > 4096) {
+		pr_err("[ZSM] The ZSM implementation is for 4KB page size, "
+				"ZRAM_FLAG_SHIFT=%d and zram_table_entry "
+				"need your attention.\n",
+				ZRAM_FLAG_SHIFT);
+		BUG_ON(1);
+	}
+	zram->zsm_on = true;
+	pr_alert("[ZSM] ZRAM compiled with ZSM, and zsm_on=%d.\n", zram->zsm_on);
+	pr_alert("[ZSM] Turn on ZSM by $echo 1 > /sys/block/zram0/zsm_on "
+			"before change the ZRAM disksize.\n");
+	pr_alert("[ZSM] Check ZSM on/off by $cat /sys/block/zram0/zsm_on\n");
+#endif
+
 	queue = blk_alloc_queue(GFP_KERNEL);
 	if (!queue) {
 		pr_err("Error allocating disk queue for device %d\n",
@@ -2121,7 +2708,6 @@ static int __init zram_init(void)
 		cpuhp_remove_multi_state(CPUHP_ZCOMP_PREPARE);
 		return ret;
 	}
-
 	zram_debugfs_create();
 	zram_major = register_blkdev(0, "zram");
 	if (zram_major <= 0) {

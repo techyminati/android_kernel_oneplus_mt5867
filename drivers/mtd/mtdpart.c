@@ -376,6 +376,11 @@ static struct mtd_part *allocate_partition(struct mtd_info *parent,
 	if (parent->_write)
 		slave->mtd._write = part_write;
 
+#if (MP_NAND_MTD == 1)
+	if (parent->priv)
+		slave->mtd.priv = parent->priv;
+#endif
+
 	if (parent->_panic_write)
 		slave->mtd._panic_write = part_panic_write;
 

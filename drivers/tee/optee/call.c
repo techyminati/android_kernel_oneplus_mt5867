@@ -22,6 +22,11 @@
 #include <linux/uaccess.h>
 #include "optee_private.h"
 #include "optee_smc.h"
+#ifdef CONFIG_MSTAR_CHIP
+#include <linux/freezer.h>
+#include "trace/events/tee.h"
+#define CREATE_TRACE_POINTS
+#endif
 
 struct optee_call_waiter {
 	struct list_head list_node;
@@ -56,8 +61,14 @@ static void optee_cq_wait_init(struct optee_call_queue *cq,
 static void optee_cq_wait_for_completion(struct optee_call_queue *cq,
 					 struct optee_call_waiter *w)
 {
+#ifdef CONFIG_MSTAR_CHIP
+	freezer_do_not_count();
+	while (wait_for_completion_interruptible(&w->c) != 0)
+		;
+	freezer_count();
+#else
 	wait_for_completion(&w->c);
-
+#endif
 	mutex_lock(&cq->mutex);
 
 	/* Move to end of list to get out of the way for other waiters */
@@ -157,11 +168,18 @@ u32 optee_do_call_with_arg(struct tee_context *ctx, phys_addr_t parg)
 			 */
 			optee_cq_wait_for_completion(&optee->call_queue, &w);
 		} else if (OPTEE_SMC_RETURN_IS_RPC(res.a0)) {
+			#ifdef CONFIG_MSTAR_CHIP
+			ktime_t t1 = ktime_set(0, 0);
+			ktime_t t2 = ktime_set(0, 0);
+			#endif
 			param.a0 = res.a0;
 			param.a1 = res.a1;
 			param.a2 = res.a2;
 			param.a3 = res.a3;
+
+			MTK_TRACE_TEE_START("RPC", res.a0, t1);
 			optee_handle_rpc(ctx, &param, &call_ctx);
+			MTK_TRACE_TEE_END("RPC", res.a0, param.a0, t1, t2);
 		} else {
 			ret = res.a0;
 			break;
@@ -223,6 +241,10 @@ int optee_open_session(struct tee_context *ctx,
 	struct optee_msg_arg *msg_arg;
 	phys_addr_t msg_parg;
 	struct optee_session *sess = NULL;
+#ifdef CONFIG_MSTAR_CHIP
+	ktime_t t1 = ktime_set(0, 0);
+	ktime_t t2 = ktime_set(0, 0);
+#endif
 
 	/* +2 for the meta parameters added below */
 	shm = get_msg_arg(ctx, arg->num_params + 2, &msg_arg, &msg_parg);
@@ -254,10 +276,12 @@ int optee_open_session(struct tee_context *ctx,
 		goto out;
 	}
 
+	MTK_TRACE_TEE_START("Open", 0, t1);
 	if (optee_do_call_with_arg(ctx, msg_parg)) {
 		msg_arg->ret = TEEC_ERROR_COMMUNICATION;
 		msg_arg->ret_origin = TEEC_ORIGIN_COMMS;
 	}
+	MTK_TRACE_TEE_END("Open", 0, msg_arg->ret, t1, t2);
 
 	if (msg_arg->ret == TEEC_SUCCESS) {
 		/* A new session has been created, add it to the list. */
@@ -292,6 +316,10 @@ int optee_close_session(struct tee_context *ctx, u32 session)
 	struct optee_msg_arg *msg_arg;
 	phys_addr_t msg_parg;
 	struct optee_session *sess;
+#ifdef CONFIG_MSTAR_CHIP
+	ktime_t t1 = ktime_set(0, 0);
+	ktime_t t2 = ktime_set(0, 0);
+#endif
 
 	/* Check that the session is valid and remove it from the list */
 	mutex_lock(&ctxdata->mutex);
@@ -307,9 +335,11 @@ int optee_close_session(struct tee_context *ctx, u32 session)
 	if (IS_ERR(shm))
 		return PTR_ERR(shm);
 
+	MTK_TRACE_TEE_START("Close", 0, t1);
 	msg_arg->cmd = OPTEE_MSG_CMD_CLOSE_SESSION;
 	msg_arg->session = session;
 	optee_do_call_with_arg(ctx, msg_parg);
+	MTK_TRACE_TEE_END("Close", 0, msg_arg->ret, t1, t2);
 
 	tee_shm_free(shm);
 	return 0;
@@ -324,6 +354,10 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 	phys_addr_t msg_parg;
 	struct optee_session *sess;
 	int rc;
+#ifdef CONFIG_MSTAR_CHIP
+	ktime_t t1 = ktime_set(0, 0);
+	ktime_t t2 = ktime_set(0, 0);
+#endif
 
 	/* Check that the session is valid */
 	mutex_lock(&ctxdata->mutex);
@@ -344,10 +378,12 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 	if (rc)
 		goto out;
 
+	MTK_TRACE_TEE_START("Invoke", msg_arg->func, t1);
 	if (optee_do_call_with_arg(ctx, msg_parg)) {
 		msg_arg->ret = TEEC_ERROR_COMMUNICATION;
 		msg_arg->ret_origin = TEEC_ORIGIN_COMMS;
 	}
+	MTK_TRACE_TEE_END("Invoke", msg_arg->func, msg_arg->ret, t1, t2);
 
 	if (optee_from_msg_param(param, arg->num_params, msg_arg->params)) {
 		msg_arg->ret = TEEC_ERROR_COMMUNICATION;
@@ -368,6 +404,10 @@ int optee_cancel_req(struct tee_context *ctx, u32 cancel_id, u32 session)
 	struct optee_msg_arg *msg_arg;
 	phys_addr_t msg_parg;
 	struct optee_session *sess;
+#ifdef CONFIG_MSTAR_CHIP
+	ktime_t t1 = ktime_set(0, 0);
+	ktime_t t2 = ktime_set(0, 0);
+#endif
 
 	/* Check that the session is valid */
 	mutex_lock(&ctxdata->mutex);
@@ -380,10 +420,12 @@ int optee_cancel_req(struct tee_context *ctx, u32 cancel_id, u32 session)
 	if (IS_ERR(shm))
 		return PTR_ERR(shm);
 
+	MTK_TRACE_TEE_START("Cancel", 0, t1);
 	msg_arg->cmd = OPTEE_MSG_CMD_CANCEL;
 	msg_arg->session = session;
 	msg_arg->cancel_id = cancel_id;
 	optee_do_call_with_arg(ctx, msg_parg);
+	MTK_TRACE_TEE_END("Cancel", 0, msg_arg->ret, t1, t2);
 
 	tee_shm_free(shm);
 	return 0;
@@ -579,6 +621,10 @@ int optee_shm_register(struct tee_context *ctx, struct tee_shm *shm,
 	u64 *pages_list;
 	phys_addr_t msg_parg;
 	int rc;
+#ifdef CONFIG_MSTAR_CHIP
+	ktime_t t1 = ktime_set(0, 0);
+	ktime_t t2 = ktime_set(0, 0);
+#endif
 
 	if (!num_pages)
 		return -EINVAL;
@@ -612,9 +658,11 @@ int optee_shm_register(struct tee_context *ctx, struct tee_shm *shm,
 	msg_arg->params->u.tmem.buf_ptr = virt_to_phys(pages_list) |
 	  (tee_shm_get_page_offset(shm) & (OPTEE_MSG_NONCONTIG_PAGE_SIZE - 1));
 
+	MTK_TRACE_TEE_START("SHM register", 0, t1);
 	if (optee_do_call_with_arg(ctx, msg_parg) ||
 	    msg_arg->ret != TEEC_SUCCESS)
 		rc = -EINVAL;
+	MTK_TRACE_TEE_END("SHM register", 0, msg_arg->ret, t1, t2);
 
 	tee_shm_free(shm_arg);
 out:
@@ -628,6 +676,10 @@ int optee_shm_unregister(struct tee_context *ctx, struct tee_shm *shm)
 	struct optee_msg_arg *msg_arg;
 	phys_addr_t msg_parg;
 	int rc = 0;
+#ifdef CONFIG_MSTAR_CHIP
+	ktime_t t1 = ktime_set(0, 0);
+	ktime_t t2 = ktime_set(0, 0);
+#endif
 
 	shm_arg = get_msg_arg(ctx, 1, &msg_arg, &msg_parg);
 	if (IS_ERR(shm_arg))
@@ -638,9 +690,12 @@ int optee_shm_unregister(struct tee_context *ctx, struct tee_shm *shm)
 	msg_arg->params[0].attr = OPTEE_MSG_ATTR_TYPE_RMEM_INPUT;
 	msg_arg->params[0].u.rmem.shm_ref = (unsigned long)shm;
 
+	MTK_TRACE_TEE_START("SHM unregister", 0, t1);
 	if (optee_do_call_with_arg(ctx, msg_parg) ||
 	    msg_arg->ret != TEEC_SUCCESS)
 		rc = -EINVAL;
+	MTK_TRACE_TEE_END("SHM unregister", 0, msg_arg->ret, t1, t2);
+
 	tee_shm_free(shm_arg);
 	return rc;
 }

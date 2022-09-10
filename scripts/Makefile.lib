@@ -293,7 +293,24 @@ cmd_dtc = mkdir -p $(dir ${dtc-tmp}) ; \
 $(obj)/%.dtb: $(src)/%.dts $(DTC) FORCE
 	$(call if_changed_dep,dtc)
 
+ifeq ($(CONFIG_MSTAR_CHIP),y)
+$(obj)/%.dtbo: $(src)/%.dts FORCE
+	@echo $(DTC) -@ -O dtb -o $@ $<
+	$(DTC) -@ -O dtb -o $@ $<;
+$(obj)/%.main_dtb: $(src)/%.main_dts FORCE
+	@echo $(DTC) -@ -O dtb -o $@ $<
+	$(DTC) -@ -O dtb -o $@ $<;
+endif
+
 dtc-tmp = $(subst $(comma),_,$(dot-target).dts.tmp)
+
+ifeq ($(CONFIG_MSTAR_CHIP),y)
+# cat
+# ---------------------------------------------------------------------------
+# Concatentate multiple files together
+quiet_cmd_cat = CAT     $@
+cmd_cat = (cat $(filter-out FORCE,$^) > $@) || (rm -f $@; false)
+endif
 
 # Bzip2
 # ---------------------------------------------------------------------------
@@ -345,7 +362,7 @@ MKIMAGE := $(srctree)/scripts/mkuboot.sh
 
 # SRCARCH just happens to match slightly more than ARCH (on sparc), so reduces
 # the number of overrides in arch makefiles
-UIMAGE_ARCH ?= $(SRCARCH)
+UIMAGE_ARCH ?= $(subst 64,,$(SRCARCH))
 UIMAGE_COMPRESSION ?= $(if $(2),$(2),none)
 UIMAGE_OPTS-y ?=
 UIMAGE_TYPE ?= kernel

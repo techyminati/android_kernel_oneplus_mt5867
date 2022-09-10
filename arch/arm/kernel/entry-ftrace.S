@@ -52,8 +52,10 @@
  */
 
 #ifndef CONFIG_OLD_MCOUNT
+#ifndef CONFIG_CC_IS_CLANG
 #if (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ < 4))
 #error Ftrace requires CONFIG_FRAME_POINTER=y with GCC older than 4.4.0.
+#endif
 #endif
 #endif
 

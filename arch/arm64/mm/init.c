@@ -61,6 +61,19 @@
  */
 s64 memstart_addr __ro_after_init = -1;
 phys_addr_t arm64_dma_phys_limit __ro_after_init;
+#if defined(CONFIG_MP_MMA_UMA_WITH_NARROW) || defined(CONFIG_MP_ASYM_UMA_ALLOCATION)
+extern u64 mma_dma_zone_size;
+#endif
+#ifdef CONFIG_MSTAR_CHIP
+#ifdef CONFIG_PSTORE_RAM
+#include <linux/pstore_ram.h>
+extern struct ramoops_platform_data ramoops_data;
+#endif
+#endif
+
+#ifdef CONFIG_MP_CMA_PATCH_CMA_DEFAULT_BUFFER_LIMITTED_TO_LX0
+extern unsigned long lx_mem_addr;
+#endif
 
 #ifdef CONFIG_BLK_DEV_INITRD
 static int __init early_initrd(char *p)
@@ -221,7 +234,11 @@ static void __init reserve_elfcorehdr(void)
  * currently assumes that for memory starting above 4G, 32-bit devices will
  * use a DMA offset.
  */
+#if defined(CONFIG_MP_MMA_UMA_WITH_NARROW) || defined(CONFIG_MP_ASYM_UMA_ALLOCATION)
+phys_addr_t __init max_zone_dma_phys(void)
+#else
 static phys_addr_t __init max_zone_dma_phys(void)
+#endif
 {
 	phys_addr_t offset = memblock_start_of_DRAM() & GENMASK_ULL(63, 32);
 	return min(offset + (1ULL << 32), memblock_end_of_DRAM());
@@ -242,7 +259,9 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 }
 
 #else
-
+#ifdef CONFIG_MP_PLATFORM_PHY_ADDRESS_MORE_THAN_2G_SET_MOVABLE
+extern u64 linux_memory3_address,linux_memory3_length;
+#endif
 static void __init zone_sizes_init(unsigned long min, unsigned long max)
 {
 	struct memblock_region *reg;
@@ -276,11 +295,31 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 		if (end > max_dma) {
 			unsigned long normal_end = min(end, max);
 			unsigned long normal_start = max(start, max_dma);
-			zhole_size[ZONE_NORMAL] -= normal_end - normal_start;
+#ifdef CONFIG_MP_PLATFORM_PHY_ADDRESS_MORE_THAN_2G_SET_MOVABLE
+                        zhole_size[ZONE_MOVABLE] -= normal_end - normal_start;
+#else
+                        zhole_size[ZONE_NORMAL] -= normal_end - normal_start;
+#endif
 		}
 	}
 
-	free_area_init_node(0, zone_size, min, zhole_size);
+#ifdef CONFIG_MP_PLATFORM_PHY_ADDRESS_MORE_THAN_2G_SET_MOVABLE
+        if (linux_memory3_length != 0) {
+                printk("(yjdbg) apply zone mapping\n");
+                zone_size[ZONE_NORMAL] = 0x80000;
+                zhole_size[ZONE_NORMAL] = 0x80000;
+                zone_size[ZONE_NORMAL] += (linux_memory3_address >> 12) - 0x180000;
+                zhole_size[ZONE_NORMAL] += (linux_memory3_address >> 12) - 0x180000;
+                zone_size[ZONE_MOVABLE] = linux_memory3_length >> 12;
+                zhole_size[ZONE_MOVABLE] = 0x0;
+        }
+
+        pr_err("max_dma: 0x%llx\n", max_dma);
+        printk("zone_sizes_init: zone_size[DMA]=0x%x,zone_size[normal]=0x%x,zone_size[move]=0x%x\n",zone_size[ZONE_DMA32],zone_size[ZONE_NORMAL],zone_size[ZONE_MOVABLE]);
+        printk("zone_sizes_init: zhole_size[DMA]=0x%x,zhole_size[normal]=0x%x,zhole_size[move]=0x%x\n",zhole_size[ZONE_DMA32],zhole_size[ZONE_NORMAL],zhole_size[ZONE_MOVABLE]);
+#endif
+
+        free_area_init_node(0, zone_size, min, zhole_size);
 }
 
 #endif /* CONFIG_NUMA */
@@ -316,6 +355,10 @@ static void __init arm64_memory_present(void)
 #endif
 
 static phys_addr_t memory_limit = PHYS_ADDR_MAX;
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+extern phys_addr_t arm_lowmem_limit;
+void reserve_page_trace_mem(phys_addr_t beg,phys_addr_t end);
+#endif
 
 /*
  * Limit the memory size that was specified via FDT.
@@ -363,6 +406,91 @@ static void __init fdt_enforce_memory_region(void)
 	if (reg.size)
 		memblock_cap_memory_range(reg.base, reg.size);
 }
+
+#ifdef CONFIG_ZRAM_OVER_GENPOOL
+extern unsigned long long carveout_start;
+extern unsigned long long carveout_end;
+extern phys_addr_t linux_memory2_address, linux_memory2_length;
+extern phys_addr_t linux_memory3_address, linux_memory3_length;
+extern phys_addr_t linux_memory4_address, linux_memory4_length;
+#include <linux/of_reserved_mem.h>
+
+unsigned long long asym_dram_size = 0x0;
+static int __init asym_dram_model(char *str)
+{
+	asym_dram_size = (unsigned long long)simple_strtol(str, NULL, 16);
+	pr_info("[ASYM_DRAM] asym_dram_size = 0x%x\n", asym_dram_size);
+	return 0;
+}
+early_param("DRAM_ASYM_SIZE", asym_dram_model);
+
+unsigned int disable_zram_over_genpool = 0;
+static int __init setup_disable_zram_over_genpool(char *str)
+{
+	get_option(&str, &disable_zram_over_genpool);
+	pr_info("[ASYM_DRAM] disable_zram_over_genpool = %d\n", disable_zram_over_genpool);
+	return 0;
+}
+early_param("disable_zram_over_genpool", setup_disable_zram_over_genpool);
+
+static void __init get_low_bandwidth_zram_region(
+	phys_addr_t *zram_start, phys_addr_t *zram_end, size_t z_size)
+{
+	phys_addr_t lx_start = 0;
+	size_t lx_size = 0;
+
+	/* get last LXn */
+	if (linux_memory4_address != 0) {
+		lx_start = linux_memory4_address;
+		lx_size = linux_memory4_length;
+	} else if (linux_memory3_address != 0) {
+		lx_start = linux_memory3_address;
+		lx_size = linux_memory3_length;
+	} else if (linux_memory2_address != 0) {
+		lx_start = linux_memory2_address;
+		lx_size = linux_memory2_length;
+	}
+
+	/* reserve from the tail of LXn */
+	*zram_start = lx_start + lx_size - z_size;
+	*zram_end = lx_start + lx_size;
+}
+
+void __init reserve_zram_genpool(void)
+{
+	phys_addr_t start = 0, end = 0;
+	phys_addr_t base = 0, align = 0;
+	size_t size;
+	int nomap;
+	int ret;
+
+	#ifdef CONFIG_ZRAM_RESERVED_DISKSIZE
+	size = CONFIG_ZRAM_RESERVED_DISKSIZE;
+	#else
+	size = 0;
+	#endif
+	align = PAGE_SIZE;
+	nomap = 0;
+
+	get_low_bandwidth_zram_region(&start, &end, size);
+	if (start <= 0 || end <= 0) {
+		printk(KERN_WARNING "%s: no low-handwidth dram region\n", __func__);
+		return;
+	}
+
+	ret = early_init_dt_alloc_reserved_memory_arch(size,
+			align, start, end, nomap, &base);
+	if (ret != 0) {
+		printk(KERN_ALERT "%s: allocated memory for zram/genpool node fail\n", __func__);
+		return;
+	}
+	printk("%s: allocated memory for zram/genpool node: base %pa, size %ld MiB\n", __func__, &base, (unsigned long)size / SZ_1M);
+
+	carveout_start = base;
+	carveout_end = carveout_start + size;
+	printk("%s: allocated memory for zram/genpool node: base 0x%llx, end 0x%llx\n", __func__, carveout_start, carveout_end);
+}
+#endif
 
 void __init arm64_memblock_init(void)
 {
@@ -417,9 +545,13 @@ void __init arm64_memblock_init(void)
 		 * initrd to become inaccessible via the linear mapping.
 		 * Otherwise, this is a no-op
 		 */
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 1)
+		u64 base = __pa(initrd_start) & PAGE_MASK;
+		u64 size = PAGE_ALIGN(__pa(initrd_end)) - base;
+#else
 		u64 base = initrd_start & PAGE_MASK;
 		u64 size = PAGE_ALIGN(initrd_end) - base;
-
+#endif
 		/*
 		 * We can only add back the initrd memory if we don't end up
 		 * with more memory than we can address via the linear mapping.
@@ -464,21 +596,52 @@ void __init arm64_memblock_init(void)
 	memblock_reserve(__pa_symbol(_text), _end - _text);
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start) {
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 1)
+		memblock_reserve(__virt_to_phys(initrd_start), initrd_end - initrd_start);
+#else
 		memblock_reserve(initrd_start, initrd_end - initrd_start);
 
 		/* the generic initrd code expects virtual addresses */
 		initrd_start = __phys_to_virt(initrd_start);
 		initrd_end = __phys_to_virt(initrd_end);
+
+#endif
 	}
+#endif
+
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
+	/*
+	 * Reserve the page tables.  These are already in use,
+	 * and can only be in node 0.
+	 */
+	//FIXME
+	memblock_reserve(__pa(swapper_pg_dir),
+		(__pa_symbol(swapper_pg_end) - __pa_symbol(swapper_pg_dir)));
+	memblock_reserve(__pa(idmap_pg_dir), IDMAP_DIR_SIZE);
+#endif
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+        reserve_page_trace_mem(PHYS_OFFSET, arm_lowmem_limit);
 #endif
 
 	early_init_fdt_scan_reserved_mem();
 
 	/* 4GB maximum for 32-bit only capable devices */
-	if (IS_ENABLED(CONFIG_ZONE_DMA32))
+	if (IS_ENABLED(CONFIG_ZONE_DMA32)) {
+#if defined(CONFIG_MP_MMA_UMA_WITH_NARROW) || defined(CONFIG_MP_ASYM_UMA_ALLOCATION)
+		if (mma_dma_zone_size > 0) {
+			arm64_dma_phys_limit = mma_dma_zone_size + memblock_start_of_DRAM();
+			pr_info("szie 0x%llx limit 0x%lx",
+				mma_dma_zone_size, (unsigned long)arm64_dma_phys_limit);
+                } else {
+			arm64_dma_phys_limit = max_zone_dma_phys();
+			pr_info("\033[35m MMAP Need Set DMA ZONE SIZE !!!\033[m\n");
+		}
+#else
 		arm64_dma_phys_limit = max_zone_dma_phys();
-	else
+#endif
+	} else {
 		arm64_dma_phys_limit = PHYS_MASK + 1;
+	}
 
 	reserve_crashkernel();
 
@@ -486,7 +649,40 @@ void __init arm64_memblock_init(void)
 
 	high_memory = __va(memblock_end_of_DRAM() - 1) + 1;
 
+#if defined(CONFIG_MP_CMA_PATCH_CMA_DEFAULT_BUFFER_LIMITTED_TO_LX0)
+	/*
+	 * this patch limit cma default buffer at LX_MEM(LX0)
+	 * original case, we only find default cma_buffer @ whole lowmem
+	 * (usually @ the backend of lowmem)
+	 */
+	pr_info("\033[35m %s(%d) find cma_default buffer at only LX0\033[m\n",
+			__func__, __LINE__);
+	dma_contiguous_reserve(min((lx_mem_addr+lx_mem_size),
+				(unsigned long)arm64_dma_phys_limit));
+#else
 	dma_contiguous_reserve(arm64_dma_phys_limit);
+#endif
+
+
+#ifdef CONFIG_MSTAR_CHIP
+	/* Reserve 16K for put magic Key,new magic mechanism*/
+	memblock_reserve(PHYS_OFFSET, 16 * 1024);
+
+#ifdef CONFIG_PSTORE_RAM
+	/* Reserve this to do ramoops (the region is defined @ dts).
+	 * The ramoops_data is defined @ fs/pstore/ram.c, you can change the setting.
+	 */
+	memblock_reserve(ramoops_data.mem_address, ramoops_data.mem_size);
+#endif
+#endif
+#ifdef CONFIG_ZRAM_OVER_GENPOOL
+	if (!disable_zram_over_genpool && asym_dram_size) {
+		reserve_zram_genpool();
+		pr_info("%s: zram_over_genpool enable!\n", __func__);
+	} else {
+		pr_info("%s: zram_over_genpool disable!\n", __func__);
+	}
+#endif
 
 	memblock_allow_resize();
 }
@@ -590,9 +786,15 @@ static void __init free_unused_memmap(void)
  */
 void __init mem_init(void)
 {
+#if defined(CONFIG_MP_MMA_UMA_WITH_NARROW) || defined(CONFIG_MP_ASYM_UMA_ALLOCATION)
 	if (swiotlb_force == SWIOTLB_FORCE ||
-	    max_pfn > (arm64_dma_phys_limit >> PAGE_SHIFT))
+		max_pfn > (max_zone_dma_phys() >> PAGE_SHIFT))
 		swiotlb_init(1);
+#else
+	if (swiotlb_force == SWIOTLB_FORCE ||
+		max_pfn > (arm64_dma_phys_limit >> PAGE_SHIFT))
+		swiotlb_init(1);
+#endif
 	else
 		swiotlb_force = SWIOTLB_NO_FORCE;
 
@@ -691,4 +893,40 @@ static int __init register_mem_limit_dumper(void)
 				       &mem_limit_notifier);
 	return 0;
 }
+
+#ifdef CONFIG_MP_PLATFORM_PHY_ADDRESS_MORE_THAN_2G_SET_MOVABLE_DEBUG
+void testAddrTranslation(void)
+{
+    printk("testAddrTranslation\n");
+    printk("%llx\n", __phys_to_virt(0x20200000));
+    printk("%llx\n", __phys_to_virt(0x53400000));
+    printk("%llx\n", __phys_to_virt(0x180000000UL));
+
+    printk("%llx\n", __virt_to_phys(__phys_to_virt(0x20200000)));
+    printk("%llx\n", __virt_to_phys(__phys_to_virt(0x53400000)));
+    printk("%llx\n", __virt_to_phys(__phys_to_virt(0x180000000UL)));
+
+    printk("%llx\n", __virt_to_phys(0xFFFFFFC000000000UL));
+    printk("%llx\n", __virt_to_phys(0xFFFFFFC025200000UL));
+    printk("%llx\n", __virt_to_phys(0xFFFFFFC06F800000UL));
+
+    printk("%llx\n", PHYS_PFN(0x20200000));
+    printk("%llx\n", PHYS_PFN(0x53400000));
+    printk("%llx\n", PHYS_PFN(0x180000000L));
+
+    printk("%llx\n", PFN_PHYS(PHYS_PFN(0x20200000)));
+    printk("%llx\n", PFN_PHYS(PHYS_PFN(0x53400000)));
+    printk("%llx\n", PFN_PHYS(PHYS_PFN(0x180000000UL)));
+
+    printk("%llx\n", page_to_phys(phys_to_page(0x20200000)));
+    printk("%llx\n", page_to_phys(phys_to_page(0x53400000)));
+    printk("%llx\n", page_to_phys(phys_to_page(0x180000000UL))); 
+
+    printk("test virt_to_page\n");
+    printk("%llx\n", page_to_virt(virt_to_page(__phys_to_virt((0x20200000)))));
+    printk("%llx\n", page_to_virt(virt_to_page(__phys_to_virt((0x53400000)))));
+    printk("%llx\n", page_to_virt(virt_to_page(__phys_to_virt((0x180000000UL))))); 
+
+}
+#endif
 __initcall(register_mem_limit_dumper);

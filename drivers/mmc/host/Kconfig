@@ -13,6 +13,46 @@ config MMC_DEBUG
 	  added host drivers please don't invent their private macro for
 	  debugging.
 
+config MMC_MSTAR_MMC_EMMC
+	tristate "MStar eMMC driver"
+	help
+	  MStar eMMC driver.
+choice
+	prompt "Default or force slow sown speed mode"
+	default MMC_MSTAR_EMMC_DEFAULT_SPEED
+
+config MMC_MSTAR_EMMC_DEFAULT_SPEED
+	bool "eMMC host default speed mode"
+	depends on MMC_MSTAR_MMC_EMMC
+	help
+	  Left Mstar eMMC host default speed mode to be unchanged.
+
+config MMC_MSTAR_EMMC_FORCE_HS200
+	bool "Force Mstar eMMC host to be HS200"
+	depends on MMC_MSTAR_MMC_EMMC
+	help
+	  Force the Mstar eMMC host controller running with HS200.
+
+config MMC_MSTAR_EMMC_FORCE_DDR52
+	bool "Force Mstar eMMC host to be DDR52"
+	depends on MMC_MSTAR_MMC_EMMC
+	help
+	  Force the Mstar eMMC host controller running with DDR52
+
+endchoice
+
+config MMC_MSTAR_MMC_EMMC_CHK_VERSION
+	tristate "MStar eMMC driver - check version"
+	depends on MMC_MSTAR_MMC_EMMC
+	help
+	  MStar eMMC driver - check version.
+
+config MMC_MSTAR_EMMC_SSC
+        tristate "Mstar EMMCPLL SSC"
+        default y
+        help
+          Enable Mstar EMMCPLL SSC settings.
+          
 config MMC_ARMMMCI
 	tristate "ARM AMBA Multimedia Card Interface support"
 	depends on ARM_AMBA

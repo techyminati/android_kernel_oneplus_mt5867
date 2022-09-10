@@ -1870,6 +1870,10 @@ static void uvc_delete(struct kref *kref)
 	usb_put_dev(dev->udev);
 
 #ifdef CONFIG_MEDIA_CONTROLLER
+#if (MP_UVC_REFACTOR_USB_DISCONNECT == 0)
+	if (media_devnode_is_registered(dev->mdev.devnode))
+		media_device_unregister(&dev->mdev);
+#endif
 	media_device_cleanup(&dev->mdev);
 #endif
 
@@ -1924,13 +1928,15 @@ static void uvc_unregister_video(struct uvc_device *dev)
 		uvc_debugfs_cleanup_stream(stream);
 	}
 
-	uvc_status_unregister(dev);
-
 	if (dev->vdev.dev)
 		v4l2_device_unregister(&dev->vdev);
+
+#if (MP_UVC_REFACTOR_USB_DISCONNECT == 1)
+	uvc_status_unregister(dev);
 #ifdef CONFIG_MEDIA_CONTROLLER
 	if (media_devnode_is_registered(dev->mdev.devnode))
 		media_device_unregister(&dev->mdev);
+#endif
 #endif
 }
 

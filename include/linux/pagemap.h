@@ -538,6 +538,15 @@ static inline __sched int wait_on_page_locked_killable(struct page *page)
 	return wait_on_page_bit_killable(compound_head(page), PG_locked);
 }
 
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+extern void wait_on_page_bit_timeout(struct page *page, int bit_nr);
+static inline void wait_on_page_locked_timeout(struct page *page)
+{
+	if (PageLocked(page))
+		wait_on_page_bit_timeout(page, PG_locked);
+}
+#endif
+
 /* 
  * Wait for a page to complete writeback
  */

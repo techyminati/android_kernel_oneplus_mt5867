@@ -22,6 +22,9 @@
 #include <linux/kmod.h>
 #include <trace/events/power.h>
 #include <linux/cpuset.h>
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+#include "power.h"
+#endif
 
 /*
  * Timeout for stopping processes
@@ -65,7 +68,9 @@ static int try_to_freeze_tasks(bool user_only)
 
 		if (!todo || time_after(jiffies, end_time))
 			break;
-
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+        if(!is_mstar_str())
+#endif
 		if (pm_wakeup_pending()) {
 			wakeup = true;
 			break;
@@ -193,6 +198,9 @@ void thaw_processes(void)
 	struct task_struct *curr = current;
 
 	trace_suspend_resume(TPS("thaw_processes"), 0, true);
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("thaw_processes begin");
+#endif
 	if (pm_freezing)
 		atomic_dec(&system_freezing_cnt);
 	pm_freezing = false;
@@ -222,6 +230,9 @@ void thaw_processes(void)
 
 	schedule();
 	pr_cont("done.\n");
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("thaw_processes end");
+#endif
 	trace_suspend_resume(TPS("thaw_processes"), 0, false);
 }
 
@@ -236,7 +247,11 @@ void thaw_kernel_threads(void)
 
 	read_lock(&tasklist_lock);
 	for_each_process_thread(g, p) {
+#ifdef CONFIG_MP_MSTAR_STR_PROCESS_FREEZE_LATE
+		if (p->flags & (PF_KTHREAD | PF_WQ_WORKER | PF_FREEZE_LATE))
+#else
 		if (p->flags & (PF_KTHREAD | PF_WQ_WORKER))
+#endif
 			__thaw_task(p);
 	}
 	read_unlock(&tasklist_lock);

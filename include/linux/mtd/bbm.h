@@ -28,6 +28,14 @@
 
 /* The maximum number of NAND chips in an array */
 #define NAND_MAX_CHIPS		8
+#include <mstar/mpatch_macro.h>
+
+#if (MP_NAND_BBT_SIZE == 1)
+/* the max number of page reserved for bbt */
+#define NAND_MAX_BBT_PAGES  32
+
+#define NAND_BBT_PAGE_COUNT 8
+#endif
 
 /**
  * struct nand_bbt_descr - bad block table descriptor
@@ -54,11 +62,20 @@
  */
 struct nand_bbt_descr {
 	int options;
+	#if (MP_NAND_BBT_SIZE == 1)
+	int pages[NAND_MAX_CHIPS][NAND_MAX_BBT_PAGES];
+	#else  //MP_NAND_BBT_SIZE == 0
 	int pages[NAND_MAX_CHIPS];
+	#endif
 	int offs;
 	int veroffs;
 	uint8_t version[NAND_MAX_CHIPS];
 	int len;
+	#if (MP_NAND_BBT_SIZE == 1)
+	int BBtMarkerPageCount;
+	int BBtMarkerPage[NAND_BBT_PAGE_COUNT];
+	int BBtMarkerOffs[NAND_BBT_PAGE_COUNT];
+	#endif
 	int maxblocks;
 	int reserved_block_code;
 	uint8_t *pattern;
@@ -89,6 +106,10 @@ struct nand_bbt_descr {
  * with NAND_BBT_CREATE.
  */
 #define NAND_BBT_CREATE_EMPTY	0x00000400
+/* Search good / bad pattern through all pages of a block */
+#define NAND_BBT_SCANALLPAGES	0x00000800
+/* Scan block empty during good / bad block scan */
+#define NAND_BBT_SCANEMPTY	0x00001000
 /* Write bbt if neccecary */
 #define NAND_BBT_WRITE		0x00002000
 /* Read and write back block contents when writing bbt */
@@ -119,6 +140,10 @@ struct nand_bbt_descr {
  * in nand_chip.bbt_options.
  */
 #define NAND_BBT_DYNAMICSTRUCT	0x80000000
+/* Search good / bad pattern on the assigned page */
+#if (MP_NAND_BBT_SIZE == 1)
+#define NAND_BBT_SCANASSIGNEDPAGES 	0x00800000
+#endif
 
 /* The maximum number of blocks to scan for a bbt */
 #define NAND_BBT_SCAN_MAXBLOCKS	4

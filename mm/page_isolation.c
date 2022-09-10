@@ -15,6 +15,18 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/page_isolation.h>
 
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+#include <linux/ksm.h>
+#endif
+
+#ifdef CONFIG_MP_CMA_PATCH_MIGRATION_FILTER
+#include <linux/pagemap.h>
+#endif
+
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+extern void show_page_trace(unsigned long pfn);
+#endif
+
 static int set_migratetype_isolate(struct page *page, int migratetype,
 				bool skip_hwpoisoned_pages)
 {
@@ -114,10 +126,15 @@ static void unset_migratetype_isolate(struct page *page, unsigned migratetype)
 		order = page_order(page);
 		if (order >= pageblock_order) {
 			pfn = page_to_pfn(page);
+			// this buddy is the neighbor with this "page" and "order"
+			// ex: page is 0xA1000000 and order is 10, the buddy is 0xA1400000
+			// ex: page is 0xA1400000 and order is 10, the buddy is 0xA1000000
+			// ex: page is 0xA1800000 and order is 10, the buddy is 0xA1C00000
+			// ex: page is 0xA1C00000 and order is 10, the buddy is 0xA1800000
 			buddy_pfn = __find_buddy_pfn(pfn, order);
 			buddy = page + (buddy_pfn - pfn);
 
-			if (pfn_valid_within(buddy_pfn) &&
+			if (pfn_valid(buddy_pfn) &&
 			    !is_migrate_isolate_page(buddy)) {
 				__isolate_free_page(page, order);
 				isolated_page = true;
@@ -247,6 +264,7 @@ int undo_isolate_page_range(unsigned long start_pfn, unsigned long end_pfn,
  *
  * Returns the last tested pfn.
  */
+extern void dump_page(struct page *page, const char *reason);
 static unsigned long
 __test_page_isolated_in_pageblock(unsigned long pfn, unsigned long end_pfn,
 				  bool skip_hwpoisoned_pages)
@@ -269,8 +287,12 @@ __test_page_isolated_in_pageblock(unsigned long pfn, unsigned long end_pfn,
 		else if (skip_hwpoisoned_pages && PageHWPoison(page))
 			/* A HWPoisoned page cannot be also PageBuddy */
 			pfn++;
-		else
+		else {
+			pr_err("\033[35m%s(%d): pfn 0x%lX is not PageBuddy\033[m\n",
+					__func__, __LINE__, pfn);
+			dump_page(page, __PRETTY_FUNCTION__);
 			break;
+		}
 	}
 
 	return pfn;
@@ -293,10 +315,13 @@ int test_pages_isolated(unsigned long start_pfn, unsigned long end_pfn,
 		page = __first_valid_page(pfn, pageblock_nr_pages);
 		if (page && !is_migrate_isolate_page(page))
 			break;
-	}
+	}	 // check every first_valid_page of a page_block is MIGRATE_ISOLATE
 	page = __first_valid_page(start_pfn, end_pfn - start_pfn);
-	if ((pfn < end_pfn) || !page)
+	if ((pfn < end_pfn) || !page) {
+		pr_err("\033[35m%s(%d): pfn is 0x%lX, end_pfn is 0x%lX\033[m\n",
+				__func__, __LINE__, pfn, end_pfn);
 		return -EBUSY;
+	}
 	/* Check all pages are free or marked as ISOLATED */
 	zone = page_zone(page);
 	spin_lock_irqsave(&zone->lock, flags);
@@ -306,6 +331,12 @@ int test_pages_isolated(unsigned long start_pfn, unsigned long end_pfn,
 
 	trace_test_pages_isolated(start_pfn, end_pfn, pfn);
 
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+	if(pfn < end_pfn)
+		pr_err("\033[35m%s(%d): pfn is 0x%lX,"
+			"start_pfn is 0x%lX, end_pfn is 0x%lX\033[m\n",
+			__func__, __LINE__, pfn, start_pfn, end_pfn);
+#endif
 	return pfn < end_pfn ? -EBUSY : 0;
 }
 

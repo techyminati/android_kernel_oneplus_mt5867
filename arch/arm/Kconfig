@@ -1,4 +1,14 @@
 # SPDX-License-Identifier: GPL-2.0
+
+#defined by mstar
+config MSTAR_CHIP
+        bool
+        default y
+
+#defined by mstar for arm-boards
+config HAVE_SCHED_CLOCK
+        bool
+
 config ARM
 	bool
 	default y
@@ -53,6 +63,7 @@ config ARM
 	select HAVE_ARCH_BITREVERSE if (CPU_32v7M || CPU_32v7) && !CPU_32v6
 	select HAVE_ARCH_JUMP_LABEL if !XIP_KERNEL && !CPU_ENDIAN_BE32 && MMU
 	select HAVE_ARCH_KGDB if !CPU_ENDIAN_BE32 && MMU
+	select HAVE_ARCH_KASAN if MMU
 	select HAVE_ARCH_MMAP_RND_BITS if MMU
 	select HAVE_ARCH_SECCOMP_FILTER if (AEABI && !OABI_COMPAT)
 	select HAVE_ARCH_THREAD_STRUCT_WHITELIST
@@ -275,17 +286,9 @@ config NEED_MACH_MEMORY_H
 
 config PHYS_OFFSET
 	hex "Physical address of main memory" if MMU
-	depends on !ARM_PATCH_PHYS_VIRT
+	depends on !ARM_PATCH_PHYS_VIRT &&  !NEED_MACH_MEMORY_H
 	default DRAM_BASE if !MMU
-	default 0x00000000 if ARCH_EBSA110 || \
-			ARCH_FOOTBRIDGE || \
-			ARCH_INTEGRATOR || \
-			ARCH_IOP13XX || \
-			ARCH_KS8695 || \
-			ARCH_REALVIEW
-	default 0x10000000 if ARCH_OMAP1 || ARCH_RPC
-	default 0x20000000 if ARCH_S5PV210
-	default 0xc0000000 if ARCH_SA1100
+	default 0x20000000 if ARCH_MSTAR
 	help
 	  Please provide the physical address corresponding to the
 	  location of main memory in your system.
@@ -352,6 +355,25 @@ config ARM_SINGLE_ARMV7M
 	select NO_IOPORT_MAP
 	select SPARSE_IRQ
 	select USE_OF
+
+config ARCH_MSTAR
+        bool "Mstar ARM-based"
+        select ARM_AMBA
+        select ARCH_HAS_CPUFREQ
+        select CLKDEV_LOOKUP
+        select GENERIC_CLOCKEVENTS
+        select ARCH_SCHED_CLOCK
+        select HAVE_CLK
+        select HAVE_SMP
+        select PLAT_MSTAR
+        select MSTAR_CHIP
+        select ARCH_HAS_HOLES_MEMORYMODEL
+        select COMMON_CLK
+        select ARCH_SPARSEMEM_ENABLE
+        select HAVE_ARM_TWD if (SMP || MP_PLATFORM_SINGLE_CORE_PRIVATE_TIMER)
+	select ARM_HAS_SG_CHAIN
+        help
+          Support mstar chip porting
 
 config ARCH_EBSA110
 	bool "EBSA-110"
@@ -853,6 +875,8 @@ source "arch/arm/mach-zx/Kconfig"
 
 source "arch/arm/mach-zynq/Kconfig"
 
+source "arch/arm/plat-mstar/Kconfig"
+
 # ARMv7-M architecture
 config ARCH_EFM32
 	bool "Energy Micro efm32"
@@ -910,9 +934,17 @@ config PLAT_PXA
 config PLAT_VERSATILE
 	bool
 
+config PLAT_MSTAR
+        bool
+
 source "arch/arm/firmware/Kconfig"
 
 source arch/arm/mm/Kconfig
+
+config ARM_NR_BANKS
+	int
+	default 16 if ARCH_EP93XX
+	default 8
 
 config IWMMXT
 	bool "Enable iWMMXt support"
@@ -1461,6 +1493,16 @@ config ARM_PSCI
 	  0022A ("Power State Coordination Interface System Software on
 	  ARM processors").
 
+config LOCAL_TIMERS
+        bool "Use local timer interrupts"
+        depends on SMP
+        default y
+        help
+          Enable support for local timers on SMP platforms, rather then the
+          legacy IPI broadcast method.  Local timers allows the system
+          accounting to be spread across the timer interval, preventing a
+          "thundering herd" at every timer tick.
+
 # The GPIO number here must be sorted by descending number. In case of
 # a multiplatform kernel, we just want the highest value required by the
 # selected platforms.
@@ -1637,6 +1679,9 @@ config ARCH_SELECT_MEMORY_MODEL
 
 config HAVE_ARCH_PFN_VALID
 	def_bool ARCH_HAS_HOLES_MEMORYMODEL || !SPARSEMEM
+
+config HOLES_IN_ZONE
+	def_bool ARCH_HAS_HOLES_MEMORYMODEL || SPARSEMEM
 
 config HAVE_GENERIC_GUP
 	def_bool y
@@ -2084,6 +2129,11 @@ config DMI
 	  decide whether certain workarounds for buggy hardware and/or
 	  firmware need to be enabled. This would require the DMI subsystem
 	  to be enabled much earlier than we do on ARM, which is non-trivial.
+
+config MEMORY_START_ADDRESS
+        hex "Physical address of the memory starting"
+        default 0x40000000 if ((MSTAR_EIFFEL || MSTAR_EDISON || MSTAR_EINSTEIN) && ANDROID)
+        default 0x40400000 if ((MSTAR_EIFFEL || MSTAR_EDISON || MSTAR_EINSTEIN) && !ANDROID)
 
 endmenu
 

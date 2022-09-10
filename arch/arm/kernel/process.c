@@ -30,7 +30,6 @@
 #include <linux/random.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/leds.h>
-
 #include <asm/processor.h>
 #include <asm/thread_notify.h>
 #include <asm/stacktrace.h>
@@ -250,6 +249,7 @@ copy_thread(unsigned long clone_flags, unsigned long stack_start,
 		childregs->ARM_r0 = 0;
 		if (stack_start)
 			childregs->ARM_sp = stack_start;
+
 	} else {
 		memset(childregs, 0, sizeof(struct pt_regs));
 		thread->cpu_context.r4 = stk_sz;
@@ -458,7 +458,6 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	 * here.
 	 */
 	arm_install_vdso(mm, addr + PAGE_SIZE);
-
  up_fail:
 	up_write(&mm->mmap_sem);
 	return ret;

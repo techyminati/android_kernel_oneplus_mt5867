@@ -394,6 +394,9 @@ static inline int __must_check kstrtoul(const char *s, unsigned int base, unsign
  * Used as a replacement for the obsolete simple_strtoull. Return code must
  * be checked.
  */
+#ifdef CONFIG_MSTAR_CHIP
+#define strict_strtol   kstrtol
+#endif
 static inline int __must_check kstrtol(const char *s, unsigned int base, long *res)
 {
 	/*

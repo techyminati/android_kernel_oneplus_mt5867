@@ -783,6 +783,52 @@ static int fat_ioctl_readdir(struct inode *inode, struct file *file,
 	return ret;
 }
 
+#if (MP_FAT_VOLUME_LABEL==1)
+static int fat_ioctl_volume_id(struct inode *dir, unsigned long arg)
+{
+	struct msdos_sb_info *sbi = MSDOS_SB(dir->i_sb);
+	return put_user(sbi->vol_id, (u32 __user *)arg);
+}
+
+static int fat_get_vol_label(struct inode *dir, loff_t *pos,
+				   struct buffer_head **bh,
+				   struct msdos_dir_entry **de)
+{
+	while (fat_get_entry(dir, pos, bh, de) >= 0) {
+		/* free entry*/
+		if (!IS_FREE((*de)->name) )/*&& !((*de)->attr & ATTR_VOLUME)*/
+			return 0;
+	}
+	return -ENOENT;
+}
+#define ATTR_LNAME (ATTR_RO | ATTR_HIDDEN| ATTR_VOLUME |ATTR_SYS)
+
+static int fat_ioctl_volume_label(struct inode *dir, unsigned long arg)
+{
+	/*struct super_block *sb = dir->i_sb;
+	struct msdos_sb_info *sbi = MSDOS_SB(sb);*/
+	struct fat_slot_info sinfo;
+	char __user *userlabel = (char __user *)arg;
+	if(userlabel == NULL)
+		return -EFAULT;
+
+	sinfo.slot_off = 0;
+	sinfo.bh = NULL;
+
+	while (fat_get_vol_label(dir, &sinfo.slot_off, &sinfo.bh,
+				   &sinfo.de) >= 0) {
+		if((sinfo.de->attr & ATTR_VOLUME) && ((sinfo.de->attr & ATTR_LNAME) != ATTR_LNAME))
+		{
+			if(copy_to_user(userlabel,sinfo.de->name,MSDOS_NAME))
+				return -EFAULT;
+			return 0;
+		}
+	}
+
+	return -ENOENT;
+}
+#endif
+
 static long fat_dir_ioctl(struct file *filp, unsigned int cmd,
 			  unsigned long arg)
 {
@@ -799,6 +845,12 @@ static long fat_dir_ioctl(struct file *filp, unsigned int cmd,
 		short_only = 0;
 		both = 1;
 		break;
+#if (MP_FAT_VOLUME_LABEL==1)
+	case FAT_IOCTL_GET_VOLUME_ID:
+		return fat_ioctl_volume_id(inode, arg);
+	case FAT_IOCTL_GET_VOLUME_LABEL:
+		return fat_ioctl_volume_label(inode, arg);
+#endif
 	default:
 		return fat_generic_ioctl(filp, cmd, arg);
 	}
@@ -839,6 +891,12 @@ static long fat_compat_dir_ioctl(struct file *filp, unsigned cmd,
 		short_only = 0;
 		both = 1;
 		break;
+#if (MP_FAT_VOLUME_LABEL==1)
+	case FAT_IOCTL_GET_VOLUME_ID:
+		return fat_ioctl_volume_id(inode, arg);
+	case FAT_IOCTL_GET_VOLUME_LABEL:
+		return fat_ioctl_volume_label(inode, arg);
+#endif
 	default:
 		return fat_generic_ioctl(filp, cmd, (unsigned long)arg);
 	}

@@ -559,6 +559,9 @@ void __init setup_nr_cpu_ids(void)
 	nr_cpu_ids = find_last_bit(cpumask_bits(cpu_possible_mask),NR_CPUS) + 1;
 }
 
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+extern void smp_clear_magic(void);
+#endif
 /* Called by boot processor to activate the rest. */
 void __init smp_init(void)
 {
@@ -583,6 +586,9 @@ void __init smp_init(void)
 	pr_info("Brought up %d node%s, %d CPU%s\n",
 		num_nodes, (num_nodes > 1 ? "s" : ""),
 		num_cpus,  (num_cpus  > 1 ? "s" : ""));
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+	smp_clear_magic();
+#endif
 
 	/* Any cleanup work */
 	smp_cpus_done(setup_max_cpus);

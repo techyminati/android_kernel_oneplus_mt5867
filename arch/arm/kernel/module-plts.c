@@ -231,7 +231,23 @@ int module_frob_arch_sections(Elf_Ehdr *ehdr, Elf_Shdr *sechdrs,
 			continue;
 
 		/* sort by type and symbol index */
+		#ifdef CONFIG_MP_PLATFORM_SKIP_RELA_SORT_KO_LIST
+		{
+			char *p = strstr(CONFIG_MP_PLATFORM_SKIP_RELA_SORT_KO_LIST, mod->name);
+			if(!p || ((*(p+strlen(mod->name)) != ' ') && (*(p+strlen(mod->name)) != '\0')))
+			{
+				/* sort by type and symbol index */
+				sort(rels, numrels, sizeof(Elf32_Rel), cmp_rel, NULL);
+			}
+			else
+			{
+				pr_info("%s:skip sort rela entry\n", mod->name);
+			}
+		}
+		#else
+			/* sort by type and symbol index */
 		sort(rels, numrels, sizeof(Elf32_Rel), cmp_rel, NULL);
+		#endif
 
 		if (strncmp(secstrings + dstsec->sh_name, ".init", 5) != 0)
 			core_plts += count_plts(syms, dstsec->sh_addr, rels,

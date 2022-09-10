@@ -2,7 +2,7 @@
 #
 # Cryptographic API
 #
-
+EXTRA_CFLAGS    +=  -Idrivers/mstar2/drv/mzc/
 obj-$(CONFIG_CRYPTO) += crypto.o
 crypto-y := api.o cipher.o compress.o memneq.o
 
@@ -127,6 +127,8 @@ obj-$(CONFIG_CRYPTO_CRC32) += crc32_generic.o
 obj-$(CONFIG_CRYPTO_CRCT10DIF) += crct10dif_common.o crct10dif_generic.o
 obj-$(CONFIG_CRYPTO_AUTHENC) += authenc.o authencesn.o
 obj-$(CONFIG_CRYPTO_LZO) += lzo.o
+obj-$(CONFIG_MP_MZCCMDQ_HW) += mzc.o
+obj-$(CONFIG_MP_MZCCMDQ_HYBRID_HW) += mzc_hybrid.o
 obj-$(CONFIG_CRYPTO_LZ4) += lz4.o
 obj-$(CONFIG_CRYPTO_LZ4HC) += lz4hc.o
 obj-$(CONFIG_CRYPTO_842) += 842.o

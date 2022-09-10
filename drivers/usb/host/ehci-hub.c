@@ -16,6 +16,10 @@
 /*-------------------------------------------------------------------------*/
 #include <linux/usb/otg.h>
 
+#ifndef MP_USB_MSTAR
+#include <mstar/mpatch_macro.h>
+#endif
+
 #define	PORT_WAKE_BITS	(PORT_WKOC_E|PORT_WKDISC_E|PORT_WKCONN_E)
 
 #ifdef	CONFIG_PM
@@ -220,12 +224,21 @@ static int ehci_bus_suspend (struct usb_hcd *hcd)
 	bool			fs_idle_delay;
 
 	ehci_dbg(ehci, "suspend root hub\n");
-
+#if (MP_USB_MSTAR==1)
+	printk("ehci%d suspend\n", hcd->port_index);
+#endif
 	if (time_before (jiffies, ehci->next_statechange))
 		msleep(5);
 
 	/* stop the schedules */
 	ehci_quiesce(ehci);
+
+#if (MP_USB_MSTAR==1)
+	/* turn off now-idle HC */
+	/* For Mstar USB host, before setting suspend
+	bit, RUN/STOP bit should be set to 0*/
+	ehci_halt (ehci);
+#endif
 
 	spin_lock_irq (&ehci->lock);
 	if (ehci->rh_state < EHCI_RH_RUNNING)
@@ -334,8 +347,10 @@ static int ehci_bus_suspend (struct usb_hcd *hcd)
 	if (ehci->bus_suspended)
 		udelay(150);
 
+#if (MP_USB_MSTAR==0)
 	/* turn off now-idle HC */
 	ehci_halt (ehci);
+#endif
 
 	spin_lock_irq(&ehci->lock);
 	if (ehci->enabled_hrtimer_events & BIT(EHCI_HRTIMER_POLL_DEAD))
@@ -364,7 +379,9 @@ static int ehci_bus_suspend (struct usb_hcd *hcd)
 	ehci->enabled_hrtimer_events = 0;
 	ehci->next_hrtimer_event = EHCI_HRTIMER_NO_EVENT;
 	spin_unlock_irq (&ehci->lock);
-
+#if (MP_USB_MSTAR==1)
+	disable_irq(hcd->irq); //20120301, for system suspend-resume
+#endif
 	hrtimer_cancel(&ehci->hrtimer);
 	return 0;
 }
@@ -401,7 +418,9 @@ static int ehci_bus_resume (struct usb_hcd *hcd)
 	power_okay = ehci_readl(ehci, &ehci->regs->intr_enable);
 	ehci_dbg(ehci, "resume root hub%s\n",
 			power_okay ? "" : " after power loss");
-
+#if (MP_USB_MSTAR==1)
+	printk("ehci%d resume\n", hcd->port_index);
+#endif
 	/* at least some APM implementations will try to deliver
 	 * IRQs right away, so delay them until we're ready.
 	 */
@@ -496,6 +515,10 @@ static int ehci_bus_resume (struct usb_hcd *hcd)
 	spin_unlock_irq(&ehci->lock);
 
 	ehci_handover_companion_ports(ehci);
+
+#if (MP_USB_MSTAR==1)
+	enable_irq(hcd->irq); //20150226, suspend fail cause ehci_hcd_mstar_drv_resume() not running
+#endif
 
 	/* Now we can safely re-enable irqs */
 	spin_lock_irq(&ehci->lock);
@@ -957,6 +980,14 @@ int ehci_hub_control(
 				msleep(5);/* wait to leave low-power mode */
 				spin_lock_irqsave(&ehci->lock, flags);
 			}
+#if (MP_USB_MSTAR==1)
+			ehci_info(ehci, "set port %d run before resume\n", wIndex + 1);
+			temp1 = ehci_readl(ehci, &ehci->regs->command);
+			ehci->command |= CMD_RUN;
+			temp1 |= CMD_RUN;
+			ehci_writel(ehci, temp1, &ehci->regs->command);
+#endif
+
 			/* resume signaling for 20 msec */
 			temp &= ~PORT_WAKE_BITS;
 			ehci_writel(ehci, temp | PORT_RESUME, status_reg);
@@ -1183,6 +1214,19 @@ int ehci_hub_control(
 			if ((temp & PORT_PE) == 0
 					|| (temp & PORT_RESET) != 0)
 				goto error;
+#if (MP_USB_MSTAR==1)
+			ehci_info(ehci, "stop port %d run before suspend\n", wIndex + 1);
+			ehci->command &= ~CMD_RUN;
+			temp1 = ehci_readl(ehci, &ehci->regs->command);
+			temp1 &= ~(CMD_RUN);
+			ehci_writel(ehci, temp1, &ehci->regs->command);
+			retval = ehci_handshake(ehci, &ehci->regs->status,
+			  STS_HALT, STS_HALT, 16 * 125);
+			if (retval != 0) {
+				ehci_err(ehci, "port %d host controller halted error %d\n",
+						wIndex + 1, retval);
+			}
+#endif
 
 			/* After above check the port must be connected.
 			 * Set appropriate bit thus could put phy into low power
@@ -1225,6 +1269,17 @@ int ehci_hub_control(
 			 * which can be fine if this root hub has a
 			 * transaction translator built in.
 			 */
+#if (MP_USB_MSTAR==1)
+			if (!(temp & PORT_CONNECT))
+			{
+				/* fail reset process, if device has gone */
+				printk("[USB] device has gone before bus reset\n");
+				retval = -ENODEV;
+				goto error_exit;
+			}
+
+			{
+#else
 			if ((temp & (PORT_PE|PORT_CONNECT)) == PORT_CONNECT
 					&& !ehci_is_TDI(ehci)
 					&& PORT_USB11 (temp)) {
@@ -1233,6 +1288,7 @@ int ehci_hub_control(
 					wIndex + 1);
 				temp |= PORT_OWNER;
 			} else {
+#endif
 				temp |= PORT_RESET;
 				temp &= ~PORT_PE;
 

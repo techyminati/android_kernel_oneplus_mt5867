@@ -38,6 +38,13 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 
 	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
 }
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+#ifdef CONFIG_ARM64
+EXPORT_SYMBOL(__arm64_sys_mmap);
+#else
+EXPORT_SYMBOL(sys_mmap);
+#endif
+#endif
 
 SYSCALL_DEFINE1(arm64_personality, unsigned int, personality)
 {

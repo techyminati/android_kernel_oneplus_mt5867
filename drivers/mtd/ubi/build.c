@@ -43,7 +43,7 @@
 #include <linux/slab.h>
 #include <linux/major.h>
 #include "ubi.h"
-
+#include <mstar/mpatch_macro.h>
 /* Maximum length of the 'mtd=' parameter */
 #define MTD_PARAM_LEN_MAX 64
 
@@ -931,6 +931,18 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 		ubi->fm_wl_pool.max_size);
 #else
 	ubi->fm_disabled = 1;
+
+	#if (MP_NAND_UBI == 1)
+	//initial for ec array
+	{
+		int idx;
+		for(idx = 0; idx < 10; idx++)
+		{
+			ubi->top_ec[idx] = 0;
+			ubi->last_ec[idx] = 2147483647;
+		}
+	}
+	#endif
 #endif
 	mutex_init(&ubi->buf_mutex);
 	mutex_init(&ubi->ckvol_mutex);
@@ -1101,6 +1113,10 @@ int ubi_detach_mtd_dev(int ubi_num, int anyway)
 	ubi_wl_close(ubi);
 	ubi_free_internal_volumes(ubi);
 	vfree(ubi->vtbl);
+#if defined(CONFIG_MTD_UBI_BACKUP_LSB) && (MP_NAND_UBI == 1)
+	kfree(ubi->databuf);
+	kfree(ubi->oobbuf);
+#endif
 	vfree(ubi->peb_buf);
 	vfree(ubi->fm_buf);
 	ubi_msg(ubi, "mtd%d is detached", ubi->mtd->index);
@@ -1292,7 +1308,11 @@ out:
 	pr_err("UBI error: cannot initialize UBI, error %d\n", err);
 	return err;
 }
+#if defined(CONFIG_MTD_UBI_DELAY_INIT) && (MP_NAND_UBI == 1)
 late_initcall(ubi_init);
+#else
+module_init(ubi_init);
+#endif
 
 static void __exit ubi_exit(void)
 {

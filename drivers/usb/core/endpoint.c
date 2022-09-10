@@ -17,6 +17,15 @@
 #include <linux/usb.h>
 #include "usb.h"
 
+#ifndef MP_USB_MSTAR
+#include <mstar/mpatch_macro.h>
+#endif
+
+#if (MP_USB_MSTAR==1)
+#include <linux/usb/hcd.h>
+#include "../host/ehci-mstar.h"
+#endif
+
 struct ep_device {
 	struct usb_endpoint_descriptor *desc;
 	struct usb_device *udev;
@@ -197,7 +206,9 @@ int usb_create_ep_devs(struct device *parent,
 	if (retval)
 		goto error_register;
 
+#if (MP_USB_MSTAR==0)
 	device_enable_async_suspend(&ep_dev->dev);
+#endif
 	endpoint->ep_dev = ep_dev;
 	return retval;
 

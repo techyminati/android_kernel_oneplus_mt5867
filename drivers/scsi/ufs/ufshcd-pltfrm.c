@@ -40,6 +40,10 @@
 #include "ufshcd.h"
 #include "ufshcd-pltfrm.h"
 
+#ifdef CONFIG_MSTAR_UFS
+#include "ufs-mstar.h"
+#endif
+
 #define UFSHCD_DEFAULT_LANES_PER_DIRECTION		2
 
 static int ufshcd_parse_clock_info(struct ufs_hba *hba)
@@ -301,23 +305,33 @@ int ufshcd_pltfrm_init(struct platform_device *pdev,
 {
 	struct ufs_hba *hba;
 	void __iomem *mmio_base;
+	#ifndef CONFIG_MSTAR_UFS
 	struct resource *mem_res;
+	#endif
 	int irq, err;
 	struct device *dev = &pdev->dev;
 
+	#ifdef CONFIG_MSTAR_UFS
+	mmio_base = (void __iomem *)REG_UFSHCI_ADDR;
+	#else
 	mem_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	mmio_base = devm_ioremap_resource(dev, mem_res);
 	if (IS_ERR(mmio_base)) {
 		err = PTR_ERR(mmio_base);
 		goto out;
 	}
+	#endif
 
+	#ifdef CONFIG_MSTAR_UFS
+	irq = UFS_IRQ_NUM;
+	#else
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
 		dev_err(dev, "IRQ resource not available\n");
 		err = -ENODEV;
 		goto out;
 	}
+	#endif
 
 	err = ufshcd_alloc_host(dev, &hba);
 	if (err) {

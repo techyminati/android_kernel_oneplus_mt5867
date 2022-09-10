@@ -160,6 +160,11 @@ unsigned int __do_page_cache_readahead(struct address_space *mapping,
 	int page_idx;
 	unsigned int nr_pages = 0;
 	loff_t isize = i_size_read(inode);
+#ifdef CONFIG_MP_CMA_PATCH_USE_UNMOVABLE_FILE_CACHE
+	gfp_t temp_gfp_mask = mapping_gfp_mask(mapping);
+	temp_gfp_mask &= ~__GFP_MOVABLE;
+	mapping_set_gfp_mask(mapping, temp_gfp_mask);
+#endif
 	gfp_t gfp_mask = readahead_gfp_mask(mapping);
 
 	if (isize == 0)
@@ -213,6 +218,24 @@ unsigned int __do_page_cache_readahead(struct address_space *mapping,
 out:
 	return nr_pages;
 }
+
+#if (MP_NTFS3G_WRAP==1)
+/*
+ * This version skips the IO if the queue is read-congested, and will tell the
+ * block layer to abandon the readahead if request allocation would block.
+ *
+ * force_page_cache_readahead() will ignore queue congestion and will block on
+ * request queues.
+ */
+int do_page_cache_readahead(struct address_space *mapping, struct file *filp,
+                        pgoff_t offset, unsigned long nr_to_read)
+{
+	if (bdi_read_congested(inode_to_bdi(mapping->host)))
+		return -1;
+	return __do_page_cache_readahead(mapping, filp, offset, nr_to_read, 0);
+}
+EXPORT_SYMBOL(do_page_cache_readahead);
+#endif
 
 /*
  * Chunk the readahead into 2 megabyte units, so that we don't pin too much

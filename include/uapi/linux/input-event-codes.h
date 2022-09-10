@@ -337,6 +337,16 @@
 
 #define KEY_MICMUTE		248	/* Mute / unmute the microphone */
 
+/*Add Mstar keyevent & IPTV keyevent Types start*/
+#define KEY_SETTINGS    249
+#define KEY_PHOTO       250   /**/
+#define KEY_FREEZE      251   /**/
+#define KEY_POSITION    252   /* IR key for fixed position */
+#define KEY_POUND       253   /* key for ir typewriting (key_#) */
+#define KEY_STAR        254   /* key for ir soft keyboard (key_*) */
+#define KEY_COLLECT     255   /* IR key for collect*/
+/*Add Mstar keyevent & IPTV keyevent Types end*/
+
 /* Code 255 is reserved for special needs of AT keyboard driver */
 
 #define BTN_MISC		0x100
@@ -689,6 +699,16 @@
 #define BTN_TRIGGER_HAPPY39		0x2e6
 #define BTN_TRIGGER_HAPPY40		0x2e7
 
+#define KEY_SKY_APP1			0x2e9
+#define KEY_SKY_APP2			0x2ea
+#define KEY_SKY_APP3			0x2eb
+#define KEY_SKY_APP4			0x2ec
+#define KEY_SKY_APP5			0x2ed
+#define KEY_SKY_APP6			0x2ee
+#define KEY_SKY_APP7			0x2ef
+#define KEY_SKY_APP8			0x2f0
+#define KEY_SKY_APP9			0x2f1
+#define KEY_SKY_APP10			0x2f2
 /* We avoid low common keys in module aliases so they don't get huge. */
 #define KEY_MIN_INTERESTING	KEY_MUTE
 #define KEY_MAX			0x2ff

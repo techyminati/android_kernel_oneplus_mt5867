@@ -43,6 +43,10 @@
 #include "transport.h"
 #include "protocol.h"
 
+#ifndef MP_USB_MSTAR
+#include <mstar/mpatch_macro.h>
+#endif
+
 /*
  * Vendor IDs for companies that seem to include the READ CAPACITY bug
  * in all their devices
@@ -397,6 +401,16 @@ static int command_abort(struct scsi_cmnd *srb)
 	struct us_data *us = host_to_us(srb->device->host);
 
 	usb_stor_dbg(us, "%s called\n", __func__);
+
+#if (MP_USB_MSTAR==1)
+	// Jonas: add patch for WD USB3.0-HDD
+	// This device will not response the first TUR command; then fail to response read10 cmd.
+	// It can be fixed by adding more time to let device be ready to response the next SCSI cmd.
+	if (srb->cmnd[0] == TEST_UNIT_READY)
+	{
+		msleep(1000);
+	}
+#endif
 
 	/*
 	 * us->srb together with the TIMED_OUT, RESETTING, and ABORTING

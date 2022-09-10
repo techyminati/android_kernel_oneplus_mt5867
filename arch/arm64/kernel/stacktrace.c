@@ -101,7 +101,11 @@ void notrace walk_stackframe(struct task_struct *tsk, struct stackframe *frame,
 			break;
 	}
 }
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+EXPORT_SYMBOL_GPL(walk_stackframe);
+#else
 NOKPROBE_SYMBOL(walk_stackframe);
+#endif
 
 #ifdef CONFIG_STACKTRACE
 struct stack_trace_data {

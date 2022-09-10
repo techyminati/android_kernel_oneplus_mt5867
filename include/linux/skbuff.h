@@ -231,7 +231,14 @@
 #define SKB_MAX_ORDER(X, ORDER) \
 	SKB_WITH_OVERHEAD((PAGE_SIZE << (ORDER)) - (X))
 #define SKB_MAX_HEAD(X)		(SKB_MAX_ORDER((X), 0))
-#define SKB_MAX_ALLOC		(SKB_MAX_ORDER(0, 2))
+
+#ifdef CONFIG_MP_CMA_PATCH_SMALLER_SOCKET_BUFFER
+//#define SKB_MAX_ALLOC       (SKB_MAX_ORDER(0, 0)) // disable the patch, due to "SKB_MAX_ALLOC < PAGE_SIZE will cause compile error"
+#define SKB_MAX_ALLOC       (SKB_MAX_ORDER(0, 2))
+#else
+#define SKB_MAX_ALLOC       (SKB_MAX_ORDER(0, 2))
+#endif
+
 
 /* return minimum truesize of one skb containing X bytes of data */
 #define SKB_TRUESIZE(X) ((X) +						\

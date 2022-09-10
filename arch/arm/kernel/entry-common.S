@@ -53,7 +53,12 @@ __ret_fast_syscall:
  UNWIND(.cantunwind	)
 	disable_irq_notrace			@ disable interrupts
 	ldr	r2, [tsk, #TI_ADDR_LIMIT]
+#ifdef CONFIG_KASAN
+	ldr	r1, =TASK_SIZE
+	cmp	r2, r1
+#else
 	cmp	r2, #TASK_SIZE
+#endif
 	blne	addr_limit_check_failed
 	ldr	r1, [tsk, #TI_FLAGS]		@ re-check for syscall tracing
 	tst	r1, #_TIF_SYSCALL_WORK | _TIF_WORK_MASK
@@ -90,7 +95,12 @@ __ret_fast_syscall:
 #endif
 	disable_irq_notrace			@ disable interrupts
 	ldr	r2, [tsk, #TI_ADDR_LIMIT]
+#ifdef CONFIG_KASAN
+	ldr     r1, =TASK_SIZE
+	cmp     r2, r1
+#else
 	cmp	r2, #TASK_SIZE
+#endif
 	blne	addr_limit_check_failed
 	ldr	r1, [tsk, #TI_FLAGS]		@ re-check for syscall tracing
 	tst	r1, #_TIF_SYSCALL_WORK | _TIF_WORK_MASK
@@ -131,7 +141,12 @@ ret_slow_syscall:
 	disable_irq_notrace			@ disable interrupts
 ENTRY(ret_to_user_from_irq)
 	ldr	r2, [tsk, #TI_ADDR_LIMIT]
+#ifdef CONFIG_KASAN
+	ldr     r1, =TASK_SIZE
+	cmp	r2, r1
+#else
 	cmp	r2, #TASK_SIZE
+#endif
 	blne	addr_limit_check_failed
 	ldr	r1, [tsk, #TI_FLAGS]
 	tst	r1, #_TIF_WORK_MASK
@@ -156,7 +171,12 @@ ENTRY(ret_from_fork)
 	movne	r0, r4
 	badrne	lr, 1f
 	retne	r5
-1:	get_thread_info tsk
+1:
+#ifndef CONFIG_MP_IRQ_STACK
+	get_thread_info tsk
+#else
+	get_thread_info 1, tsk
+#endif
 	b	ret_slow_syscall
 ENDPROC(ret_from_fork)
 
@@ -243,7 +263,11 @@ ENTRY(vector_swi)
 	bic	scno, scno, #0xff000000		@ mask off SWI op-code
 	eor	scno, scno, #__NR_SYSCALL_BASE	@ check OS number
 #endif
+#ifndef CONFIG_MP_IRQ_STACK
 	get_thread_info tsk
+#else
+	get_thread_info 1, tsk
+#endif
 	/*
 	 * Reload the registers that may have been corrupted on entry to
 	 * the syscall assembly (by tracing or context tracking.)
@@ -410,6 +434,9 @@ ENDPROC(sys_fstatfs64_wrapper)
  * Note: off_4k (r5) is always units of 4K.  If we can't do the requested
  * offset, we return EINVAL.
  */
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+ENTRY(sys_mmap)
+#endif
 sys_mmap2:
 		str	r5, [sp, #4]
 		b	sys_mmap_pgoff

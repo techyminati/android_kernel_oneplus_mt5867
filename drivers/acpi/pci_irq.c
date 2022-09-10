@@ -423,6 +423,9 @@ int acpi_pci_irq_enable(struct pci_dev *dev)
 	char *link = NULL;
 	char link_desc[16];
 	int rc;
+#if defined(CONFIG_MP_PCI_MSTAR)
+	struct pci_sys_data *sys = dev->sysdata;
+#endif
 
 	pin = dev->pin;
 	if (!pin) {
@@ -475,7 +478,13 @@ int acpi_pci_irq_enable(struct pci_dev *dev)
 		return 0;
 	}
 
+#if defined(CONFIG_MP_PCI_MSTAR)
+	pci_read_config_byte((const struct pci_dev *)dev, PCI_INTERRUPT_PIN, &pin);
+	if (sys->map_irq)
+		dev->irq = sys->map_irq((const struct pci_dev *)dev, 0, pin);
+#else
 	rc = acpi_register_gsi(&dev->dev, gsi, triggering, polarity);
+#endif
 	if (rc < 0) {
 		dev_warn(&dev->dev, "PCI INT %c: failed to register GSI\n",
 			 pin_name(pin));

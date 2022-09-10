@@ -16,7 +16,11 @@
 #include <asm/fpstate.h>
 #include <asm/page.h>
 
+#ifdef CONFIG_KASAN
+#define THREAD_SIZE_ORDER	2
+#else
 #define THREAD_SIZE_ORDER	1
+#endif
 #define THREAD_SIZE		(PAGE_SIZE << THREAD_SIZE_ORDER)
 #define THREAD_START_SP		(THREAD_SIZE - 8)
 
@@ -83,6 +87,7 @@ register unsigned long current_stack_pointer asm ("sp");
 /*
  * how to get the thread information struct from C
  */
+#ifndef CONFIG_MP_IRQ_STACK
 static inline struct thread_info *current_thread_info(void) __attribute_const__;
 
 static inline struct thread_info *current_thread_info(void)
@@ -90,6 +95,9 @@ static inline struct thread_info *current_thread_info(void)
 	return (struct thread_info *)
 		(current_stack_pointer & ~(THREAD_SIZE - 1));
 }
+#else
+extern struct thread_info *current_thread_info(void) __attribute_const__;
+#endif
 
 #define thread_saved_pc(tsk)	\
 	((unsigned long)(task_thread_info(tsk)->cpu_context.pc))

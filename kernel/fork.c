@@ -102,11 +102,19 @@
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
-
+#if defined(CONFIG_MP_FindTaskStatus)
+#include "mdrv_FindTaskStatus.h"
+#endif
+#if defined(CONFIG_MP_BENCHMARK_ACCEL87) || defined(CONFIG_MP_BENCHMARK_CPU_DVFS_SCALING)
+#include "mdrv_benchmark_optimize.h"
+#endif
 #include <trace/events/sched.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/task.h>
+
+unsigned long mask_TVOS_exclusive_core_0 = 0x1;
+
 
 /*
  * Minimum number of threads to boot the kernel
@@ -173,6 +181,36 @@ static inline void free_task_struct(struct task_struct *tsk)
  * Allocate pages if THREAD_SIZE is >= PAGE_SIZE, otherwise use a
  * kmemcache based allocator.
  */
+# if THREAD_SIZE >= PAGE_SIZE
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+#define LIST_CACHE_CNT  512 * 1
+atomic_t thread_info_cache_cnt = ATOMIC_INIT(0);
+static struct list_head thread_info_cache_list;
+spinlock_t thread_info_cache_lock;
+#endif
+
+#ifdef CONFIG_MP_DEBUG_TOOL_THREAD_CREATE_MONITOR
+int get_proc_thread_cnt(struct task_struct *p, int *dead_cnt)
+{
+	struct task_struct *t;
+	int cnt = 0;
+	*dead_cnt = 0;
+
+	for_each_thread(p, t) {
+		cnt++;
+		if(t->state == TASK_DEAD)
+			(*dead_cnt)++;
+	}
+	return cnt;
+}
+
+void notify_alloc_thread_info(struct thread_info *thread_info);
+void notify_alloc_thread_free(struct thread_info *thread_info);
+void show_thread_trace_info(void);
+uint32_t last_prt_jiffies = 0;
+#endif
+#endif
+
 # if THREAD_SIZE >= PAGE_SIZE || defined(CONFIG_VMAP_STACK)
 
 #ifdef CONFIG_VMAP_STACK
@@ -241,9 +279,51 @@ static unsigned long *alloc_thread_stack_node(struct task_struct *tsk, int node)
 	}
 	return stack;
 #else
-	struct page *page = alloc_pages_node(node, THREADINFO_GFP,
-					     THREAD_SIZE_ORDER);
+	struct page *page;
 
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+	unsigned long flags;
+	if (atomic_read(&thread_info_cache_cnt) <= 10) {
+#ifdef CONFIG_MP_DEBUG_TOOL_THREAD_CREATE_MONITOR
+		spin_lock_irqsave(&thread_info_cache_lock, flags);
+		if (jiffies - last_prt_jiffies > 30 * HZ) {
+			show_thread_trace_info();
+			last_prt_jiffies = jiffies;
+		}
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+#endif
+	}
+
+	spin_lock_irqsave(&thread_info_cache_lock, flags);
+
+	if(atomic_add_unless(&thread_info_cache_cnt, -1, 0))
+	{
+		struct list_head *list;
+		BUG_ON(list_empty(&thread_info_cache_list));
+		list = thread_info_cache_list.next;
+		list_del(list);
+		page = container_of(list, struct page, lru);
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+	}
+    else
+#endif
+	{
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+#endif
+		page = alloc_pages_node(node, THREADINFO_GFP,
+					THREAD_SIZE_ORDER);
+	}
+
+#ifdef CONFIG_MP_DEBUG_TOOL_THREAD_CREATE_MONITOR
+	if(page)
+	{
+		spin_lock_irqsave(&thread_info_cache_lock, flags);
+		printk("\033[31mFunction = %s, Line = %d, notify_alloc_thread_info is not ready, thread_info is not in task->stack\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+		//notify_alloc_thread_info((struct thread_info *)page_address(page));
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+	}
+#endif
 	if (likely(page)) {
 		tsk->stack = page_address(page);
 		return tsk->stack;
@@ -271,8 +351,60 @@ static inline void free_thread_stack(struct task_struct *tsk)
 	}
 #endif
 
-	__free_pages(virt_to_page(tsk->stack), THREAD_SIZE_ORDER);
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+	unsigned long flags;
+#ifdef CONFIG_MP_DEBUG_TOOL_THREAD_CREATE_MONITOR
+	spin_lock_irqsave(&thread_info_cache_lock, flags);
+	printk("\033[31mFunction = %s, Line = %d, notify_alloc_thread_free is not ready. thread_info is not in task->stack\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+	//notify_alloc_thread_free(tsk->stack);
+	spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+#endif
+	spin_lock_irqsave(&thread_info_cache_lock, flags);
+	if(tsk->stack && atomic_read(&thread_info_cache_cnt) < LIST_CACHE_CNT)
+    {
+		struct page *page = virt_to_page((void *)tsk->stack);
+		list_add(&page->lru, &thread_info_cache_list);
+		atomic_inc(&thread_info_cache_cnt);
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+    }
+	else
+#endif
+	{
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+#endif
+		__free_pages(virt_to_page(tsk->stack), THREAD_SIZE_ORDER);
+	}
 }
+
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+void __init thread_stack_cache_init(void)
+{
+
+	struct page *page;
+	unsigned long flags;
+
+	INIT_LIST_HEAD(&thread_info_cache_list);
+	atomic_set(&thread_info_cache_cnt, 0);
+	spin_lock_init(&thread_info_cache_lock);
+
+	while(atomic_read(&thread_info_cache_cnt) < LIST_CACHE_CNT)
+	{
+		page = alloc_pages_node(NUMA_NO_NODE, THREADINFO_GFP,
+									THREAD_SIZE_ORDER);
+
+		spin_lock_irqsave(&thread_info_cache_lock, flags);
+		if(page)
+		{
+			list_add(&page->lru, &thread_info_cache_list);
+			atomic_inc(&thread_info_cache_cnt);
+		}
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+	}
+	printk(KERN_ERR "\033[31mthread_info_cache_init, allocating %d thread_pool is done\033[m\n", LIST_CACHE_CNT);
+}
+#endif
+
 # else
 static struct kmem_cache *thread_stack_cache;
 
@@ -2316,6 +2448,21 @@ struct task_struct *fork_idle(int cpu)
  * It copies the process, and if successful kick-starts
  * it and waits for it to finish using the VM if required.
  */
+#if defined(CONFIG_MP_BENCHMARK_CPU_DVFS_SCALING)
+struct task_struct *bench_boost_sensor=NULL;
+struct task_struct *app_boost_sensor=NULL;
+struct cpu_scaling_list *bench_boost_list = NULL;
+struct cpu_scaling_list *app_boost_list = NULL;
+extern struct mutex app_boost_list_lock;
+extern struct mutex bench_boost_list_lock;
+#endif
+#if defined(CONFIG_MP_BENCHMARK_ACCEL87)
+struct task_struct *accel87_sensor=NULL;
+struct cpu_scaling_list *accel87_list_head = NULL;
+extern struct mutex accel87_list_lock;
+
+extern struct cpu_scaling_list *TVOS_list_head;
+#endif
 long _do_fork(unsigned long clone_flags,
 	      unsigned long stack_start,
 	      unsigned long stack_size,
@@ -2328,6 +2475,7 @@ long _do_fork(unsigned long clone_flags,
 	struct task_struct *p;
 	int trace = 0;
 	long nr;
+	int new_pid;
 
 	/*
 	 * Determine whether and which event to report to ptracer.  When
@@ -2355,13 +2503,13 @@ long _do_fork(unsigned long clone_flags,
 		return PTR_ERR(p);
 
 	cpufreq_task_times_alloc(p);
+	new_pid = p->tgid;
 
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.
 	 */
 	trace_sched_process_fork(current, p);
-
 	pid = get_task_pid(p, PIDTYPE_PID);
 	nr = pid_vnr(pid);
 
@@ -2374,6 +2522,108 @@ long _do_fork(unsigned long clone_flags,
 		get_task_struct(p);
 	}
 
+#if defined(CONFIG_MP_FindTaskStatus)
+        rcu_read_lock();
+		struct task_struct *new_parent = NULL;
+        if(find_task_by_pid_ns(new_pid,&init_pid_ns) != NULL)
+        {
+            new_parent = find_task_by_pid_ns(new_pid,&init_pid_ns);
+            if (new_parent !=NULL)
+            {
+                get_task_struct(new_parent);
+		task_lock(new_parent);
+                if (strlen(new_parent->comm) >= 4 && found_Special_Task(TaskStatus_name_list,new_parent->comm,LIST_MAX_LENGTH))
+		{
+		    printk("\033[0;41;37m do_fork:%s (pid,tgid)=(%d,%d) \033[m\n",new_parent->comm,new_parent->pid,new_parent->tgid);
+                    task_unlock(new_parent);
+		    Set_Target_pid(new_parent->tgid);
+                }
+		else
+                {
+                    task_unlock(new_parent);
+                }
+                put_task_struct(new_parent);
+	    }
+	}
+		rcu_read_unlock();
+#endif
+
+#if defined(CONFIG_MP_BENCHMARK_ACCEL87) || defined(CONFIG_MP_BENCHMARK_CPU_DVFS_SCALING)
+        rcu_read_lock();
+
+        struct task_struct *parent = NULL;
+
+        if (find_task_by_pid_ns(new_pid, &init_pid_ns) != NULL) {
+		parent = find_task_by_pid_ns(new_pid, &init_pid_ns);
+		if (parent != NULL) {
+			get_task_struct(parent);
+#if defined(CONFIG_MP_BENCHMARK_CPU_DVFS_SCALING)
+			task_lock(parent);
+			if (strlen(parent->comm) >= 4 && foundSpecialTask(bench_boost_name_list, parent->comm,LIST_MAX_LENGTH)) {
+				task_unlock(parent);
+				mutex_lock(&bench_boost_list_lock);
+				bench_boost_list = cpu_scaling_list_add(bench_boost_list,
+									parent);
+				mutex_unlock(&bench_boost_list_lock);
+
+			} else if (strlen(parent->comm) >= 4 && foundSpecialTask(app_boost_name_list,parent->comm, LIST_MAX_LENGTH)) {
+				task_unlock(parent);
+				mutex_lock(&app_boost_list_lock);
+				app_boost_list = cpu_scaling_list_add(app_boost_list,parent);
+				mutex_unlock(&app_boost_list_lock);
+			} else {
+				task_unlock(parent);
+			}
+#endif
+#if defined(CONFIG_MP_BENCHMARK_ACCEL87)
+			task_lock(parent);
+			if (strlen(parent->comm) >= 4) {
+				//add TVOS to list
+				if (!strcmp(parent->comm, "tvos")) {
+					task_unlock(parent);
+					struct task_struct *TVOS_parent;
+					TVOS_parent = NULL;
+					TVOS_parent = find_task_by_pid_ns(p->tgid,&init_pid_ns);
+					if (TVOS_parent != NULL) {
+						mutex_lock(&accel87_list_lock);
+						TVOS_list_head = accel87_list_add(TVOS_list_head,TVOS_parent);
+						mutex_unlock(&accel87_list_lock);
+					}
+				} else if (strstr(parent->comm, "ABenchMark") || strstr(parent->comm, "antutu2dtest")
+						|| strstr(parent->comm, "antutu3dtest") || strstr(parent->comm, "bench64")
+						|| strstr(parent->comm, "remote2d") || strstr(parent->comm, "benchmark.full")
+						|| strstr(parent->comm, "tvbenchmark") || strstr(parent->comm, "mark:remote3d"))
+				{
+					task_unlock(parent);
+					static unsigned long mask_cpu_exclusive_core_0 = 0;
+					mask_cpu_exclusive_core_0=get_CPU_mask(e_Bigcore);
+#if defined(CONFIG_MP_DVFS_CPUHOTPLUG_USE_ONLINE_CPU_MAX_LOAD) //hotplug
+					unsigned long mask_cpu_exclusive_head_tail_core = 0;
+					unsigned long one = 1;
+					mask_cpu_exclusive_head_tail_core = mask_cpu_exclusive_core_0 & ~(one << (num_online_cpus()-1));
+					sched_setaffinity(p->pid, to_cpumask(&mask_cpu_exclusive_head_tail_core));
+					sched_setaffinity(p->tgid, to_cpumask(&mask_cpu_exclusive_head_tail_core));
+#else // no hotplug
+					sched_setaffinity(p->pid, to_cpumask(&mask_cpu_exclusive_core_0));
+					sched_setaffinity(p->tgid, to_cpumask(&mask_cpu_exclusive_core_0));
+					//printk("\033[0;41;37m do_fork:%s (pid,tgid)=(%d,%d) setaffinity=0x%x   \033[m\n",p->group_leader->comm,p->pid,p->tgid,mask_cpu_exclusive_core_0);
+#endif //endhotplug
+					mutex_lock(&accel87_list_lock);
+					accel87_list_head = accel87_list_add(accel87_list_head,parent);
+					mutex_unlock(&accel87_list_lock);
+
+				} else {
+					task_unlock(parent);
+				}
+			} else {
+				task_unlock(parent);
+			}
+#endif
+			put_task_struct(parent);
+		} //parent (group_leader)
+	}
+	rcu_read_unlock();
+#endif
 	wake_up_new_task(p);
 
 	/* forking complete and child started to run, tell ptracer */
@@ -2386,6 +2636,7 @@ long _do_fork(unsigned long clone_flags,
 	}
 
 	put_pid(pid);
+
 	return nr;
 }
 

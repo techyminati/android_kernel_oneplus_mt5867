@@ -28,6 +28,11 @@ struct page_owner {
 
 static bool page_owner_disabled = true;
 DEFINE_STATIC_KEY_FALSE(page_owner_inited);
+#ifdef CONFIG_MP_DEBUG_TOOL_MSTAR_PAGE_OWNER
+#define ERROR_PAGE_OWNER_BUF_SIZE (4096)
+static DEFINE_SPINLOCK(err_page_owner_buf_lock);
+static char *err_page_owner_buf = NULL;
+#endif
 
 static depot_stack_handle_t dummy_handle;
 static depot_stack_handle_t failure_handle;
@@ -285,7 +290,7 @@ void pagetypeinfo_showmixedcount_print(struct seq_file *m,
 		pageblock_mt = get_pageblock_migratetype(page);
 
 		for (; pfn < block_end_pfn; pfn++) {
-			if (!pfn_valid_within(pfn))
+			if (!pfn_valid(pfn))
 				continue;
 
 			/* The pageblock is online, no need to recheck. */
@@ -451,6 +456,145 @@ void __dump_page_owner(struct page *page)
 			migrate_reason_names[page_owner->last_migrate_reason]);
 }
 
+#ifdef CONFIG_MP_DEBUG_TOOL_MSTAR_PAGE_OWNER
+static ssize_t
+print_page_owner_v2(char __user *buf, size_t count, unsigned long pfn,
+		struct page *page, struct page_owner *page_owner,
+		depot_stack_handle_t handle)
+{
+	int ret;
+	int pageblock_mt, page_mt;
+	char *kbuf = buf;
+	unsigned long entries[PAGE_OWNER_STACK_DEPTH];
+	struct stack_trace trace = {
+		.nr_entries = 0,
+		.entries = entries,
+		.max_entries = PAGE_OWNER_STACK_DEPTH,
+		.skip = 0
+	};
+
+	ret = snprintf(kbuf, count,
+			"Page allocated via order %u, mask %#x(%pGg)\n",
+			page_owner->order, page_owner->gfp_mask,
+			&page_owner->gfp_mask);
+
+	if (ret >= count)
+		goto err;
+
+	/* Print information relevant to grouping pages by mobility */
+	pageblock_mt = get_pageblock_migratetype(page);
+	page_mt  = gfpflags_to_migratetype(page_owner->gfp_mask);
+	ret += snprintf(kbuf + ret, count - ret,
+			"PFN %lu type %s Block %lu type %s Flags %#lx(%pGp)\n",
+			pfn,
+			migratetype_names[page_mt],
+			pfn >> pageblock_order,
+			migratetype_names[pageblock_mt],
+			page->flags, &page->flags);
+
+	if (ret >= count)
+		goto err;
+
+	depot_fetch_stack(handle, &trace);
+	ret += snprint_stack_trace(kbuf + ret, count - ret, &trace, 0);
+	if (ret >= count)
+		goto err;
+
+	if (page_owner->last_migrate_reason != -1) {
+		ret += snprintf(kbuf + ret, count - ret,
+				"Page has been migrated, last migrate reason: %s\n",
+				migrate_reason_names[page_owner->last_migrate_reason]);
+		if (ret >= count)
+			goto err;
+	}
+
+	ret += snprintf(kbuf + ret, count - ret, "\n");
+	if (ret >= count)
+		goto err;
+
+	return ret;
+
+err:
+	return -ENOMEM;
+}
+
+/* This is used to print the page_owner info of a selected pfn.
+   While doing read_page_owner() to print the page_owner of all allcated pages,
+   we call print_error_page_trace() to print 1st pfn for allocated pages.
+   By doing that, we can verify the print_error_page_trace() works correctly.
+   */
+void print_error_page_trace(unsigned long pfn)
+{
+	struct page *page;
+	struct page_ext *page_ext;
+	struct page_owner *page_owner;
+	depot_stack_handle_t handle;
+	char *buf = err_page_owner_buf;
+	unsigned long irq_flags;
+
+	if (!static_branch_unlikely(&page_owner_inited))
+	{
+		printk("\033[35mFunction = %s, Line = %d\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+		return -EINVAL;
+	}
+
+	if (!buf)
+	{
+		printk("\033[35mFunction = %s, Line = %d, buf alloc failed\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+		return -ENOMEM;
+	}
+
+	page = pfn_to_page(pfn);
+	if (PageBuddy(page)) {
+		unsigned long freepage_order = page_order_unsafe(page);
+
+		if (freepage_order < MAX_ORDER)
+			pfn += (1UL << freepage_order) - 1;
+		printk("\033[31mFunction = %s, Line = %d, this pfn 0x%lX is @ PageBuddy\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+		return;
+	}
+
+	page_ext = lookup_page_ext(page);
+	if (unlikely(!page_ext))
+	{
+		printk("\033[31mFunction = %s, Line = %d, this pfn 0x%lX has no page_ext\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+		return;
+	}
+
+	/*
+	 * Some pages could be missed by concurrent allocation or free,
+	 * because we don't hold the zone lock.
+	 */
+	if (!test_bit(PAGE_EXT_OWNER, &page_ext->flags))
+	{
+		printk("\033[31mFunction = %s, Line = %d, this pfn 0x%lX does not have PAGE_EXT_OWNER\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+		return;
+	}
+
+	page_owner = get_page_owner(page_ext);
+
+	/*
+	 * Access to page_ext->handle isn't synchronous so we should
+	 * be careful to access it.
+	 */
+	handle = READ_ONCE(page_owner->handle);
+	if (!handle)
+	{
+		printk("\033[31mFunction = %s, Line = %d, this pfn 0x%lX does not have page_owner->handle\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+		return;
+	}
+
+	spin_lock_irqsave(&err_page_owner_buf_lock,irq_flags);
+	print_page_owner_v2(buf, count, pfn, page,	page_owner, handle);
+	spin_unlock_irqrestore(&err_page_owner_buf_lock,irq_flags);
+
+	printk("\033[35mFunction = %s, Line = %d, \n\n\n%s\033[m\n\n\n", __PRETTY_FUNCTION__, __LINE__, buf); // joe.liu
+	kfree(buf);
+}
+
+static volatile int test_print_pfn_owner = 0;
+#endif
+
 static ssize_t
 read_page_owner(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
@@ -484,7 +628,7 @@ read_page_owner(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 		}
 
 		/* Check for holes within a MAX_ORDER area */
-		if (!pfn_valid_within(pfn))
+		if (!pfn_valid(pfn))
 			continue;
 
 		page = pfn_to_page(pfn);
@@ -519,7 +663,14 @@ read_page_owner(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 
 		/* Record the next PFN to read in the file offset */
 		*ppos = (pfn - min_low_pfn) + 1;
-
+#ifdef CONFIG_MP_DEBUG_TOOL_MSTAR_PAGE_OWNER
+		if (!test_print_pfn_owner) {
+			printk("\033[35mFunction = %s, Line = %d, [Start] print_error_page_trace\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+			print_error_page_trace(pfn);
+			test_print_pfn_owner = 1;
+			printk("\033[35mFunction = %s, Line = %d, [End] print_error_page_trace\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+		}
+#endif
 		return print_page_owner(buf, count, pfn, page,
 				page_owner, handle);
 	}
@@ -553,7 +704,7 @@ static void init_pages_in_zone(pg_data_t *pgdat, struct zone *zone)
 			struct page *page;
 			struct page_ext *page_ext;
 
-			if (!pfn_valid_within(pfn))
+			if (!pfn_valid(pfn))
 				continue;
 
 			page = pfn_to_page(pfn);
@@ -631,6 +782,13 @@ static int __init pageowner_init(void)
 		pr_info("page_owner is disabled\n");
 		return 0;
 	}
+
+#ifdef CONFIG_MP_DEBUG_TOOL_MSTAR_PAGE_OWNER
+	err_page_owner_buf = kmalloc(ERROR_PAGE_OWNER_BUF_SIZE, GFP_KERNEL);
+	if(!err_page_owner_buf)
+		pr_err("allloc %x for printing error page owner fails\n",
+					ERROR_PAGE_OWNER_BUF_SIZE);
+#endif
 
 	dentry = debugfs_create_file("page_owner", 0400, NULL,
 				     NULL, &proc_page_owner_operations);

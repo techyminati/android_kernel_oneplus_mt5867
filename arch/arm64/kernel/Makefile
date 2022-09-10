@@ -11,6 +11,10 @@ CFLAGS_REMOVE_ftrace.o = -pg
 CFLAGS_REMOVE_insn.o = -pg
 CFLAGS_REMOVE_return_address.o = -pg
 
+ifeq ($(CONFIG_MP_PLATFORM_ARM_64bit_PORTING),y)
+EXTRA_CFLAGS      +=  -Idrivers/mstar2/include
+endif
+
 # Object file lists.
 arm64-obj-y		:= debug-monitors.o entry.o irq.o fpsimd.o		\
 			   entry-fpsimd.o process.o ptrace.o setup.o signal.o	\
@@ -41,6 +45,7 @@ arm64-obj-$(CONFIG_JUMP_LABEL)		+= jump_label.o
 arm64-obj-$(CONFIG_KGDB)		+= kgdb.o
 arm64-obj-$(CONFIG_EFI)			+= efi.o efi-entry.stub.o		\
 					   efi-rt-wrapper.o
+arm64-obj-$(CONFIG_MP_PCI_MSTAR)	+= bios32.o
 arm64-obj-$(CONFIG_PCI)			+= pci.o
 arm64-obj-$(CONFIG_ARMV8_DEPRECATED)	+= armv8_deprecated.o
 arm64-obj-$(CONFIG_ACPI)		+= acpi.o
@@ -57,6 +62,8 @@ arm64-obj-$(CONFIG_CRASH_DUMP)		+= crash_dump.o
 arm64-obj-$(CONFIG_CRASH_CORE)		+= crash_core.o
 arm64-obj-$(CONFIG_ARM_SDE_INTERFACE)	+= sdei.o
 arm64-obj-$(CONFIG_ARM64_SSBD)		+= ssbd.o
+arm64-obj-$(CONFIG_MSTAR_FASTBOOT)	+= mstar_hibernate.o
+obj-$(CONFIG_MP_PLATFORM_MSTAR_LEGANCY_INTR)	+= mstar_irq.o
 arm64-obj-$(CONFIG_SHADOW_CALL_STACK)	+= scs.o
 
 obj-y					+= $(arm64-obj-y) vdso/ probes/

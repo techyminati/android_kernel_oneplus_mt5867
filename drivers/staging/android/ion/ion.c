@@ -30,6 +30,12 @@
 #include <linux/vmalloc.h>
 
 #include "ion.h"
+#include "mdrv_types.h"
+#include "mdrv_system.h"
+
+#ifdef CONFIG_MP_ION_PATCH_MSTAR
+#include "linux/ion.h"
+#endif
 
 static struct ion_device *internal_dev;
 static int heap_id;
@@ -61,11 +67,31 @@ static void ion_buffer_add(struct ion_device *dev,
 	rb_insert_color(&buffer->node, &dev->buffers);
 }
 
+#ifdef CONFIG_MP_MMA_ENABLE
+void ion_set_buffer_cached(struct dma_buf* dmabuf, bool cached)
+{
+	unsigned long flags;
+	struct ion_buffer *buffer = dmabuf->priv;
+	if (cached)
+		flags = ION_FLAG_CACHED | ION_FLAG_CACHED_NEEDS_SYNC;
+	else
+		flags = 0;
+	buffer->flags = flags;
+}
+EXPORT_SYMBOL(ion_set_buffer_cached);
+#endif
+
 /* this function should only be called while dev->lock is held */
 static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 					    struct ion_device *dev,
 					    unsigned long len,
-					    unsigned long flags)
+#ifdef CONFIG_MSTAR_CHIP
+					    unsigned long flags,
+					    size_t start
+#else
+					    unsigned long flags
+#endif
+					    )
 {
 	struct ion_buffer *buffer;
 	int ret;
@@ -78,6 +104,9 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 	buffer->flags = flags;
 	buffer->dev = dev;
 	buffer->size = len;
+#ifdef CONFIG_MSTAR_CHIP
+	buffer->start = start;
+#endif
 
 	ret = heap->ops->allocate(heap, buffer, len, flags);
 
@@ -138,6 +167,53 @@ static void _ion_buffer_destroy(struct ion_buffer *buffer)
 	else
 		ion_buffer_destroy(buffer);
 }
+
+#ifdef CONFIG_MSTAR_CHIP
+static void busAddr_to_MiuOffset(phys_addr_t bus_addr, unsigned int *miu,
+				size_t *offset)
+{
+	if (bus_addr >= ARM_MIU3_BUS_BASE) {
+		*miu = 3;
+		*offset = (size_t)(bus_addr - ARM_MIU3_BUS_BASE);
+	} else if (bus_addr >= ARM_MIU2_BUS_BASE) {
+		*miu = 2;
+		*offset = (size_t)(bus_addr - ARM_MIU2_BUS_BASE);
+	} else if (bus_addr >= ARM_MIU1_BUS_BASE) {
+		*miu = 1;
+		*offset = (size_t)(bus_addr - ARM_MIU1_BUS_BASE);
+	} else if (bus_addr >= ARM_MIU0_BUS_BASE) {
+		*miu = 0;
+		*offset = (size_t)(bus_addr - ARM_MIU0_BUS_BASE);
+	} else
+		pr_err("mstar ion: invalid bus addr %pap\n", &bus_addr);
+}
+#endif
+
+#ifdef CONFIG_MSTAR_CMAPOOL
+#ifdef CONFIG_MP_CMA_PATCH_CMA_MSTAR_DRIVER_BUFFER
+struct device * ion_get_heap_dev(struct ion_client *client, unsigned int heap_id_mask)
+{
+	struct ion_device *dev = internal_dev;
+	struct device * cma_dev = NULL;
+	struct ion_heap *heap;
+
+	down_read(&dev->lock);
+	plist_for_each_entry(heap, &dev->heaps, node) {
+		/* if the caller didn't specify this heap id */
+		if (!((1 << heap->mst_hid) & heap_id_mask))
+			continue;
+		if (heap->type == ION_HEAP_TYPE_MSTAR_CMA) {
+			cma_dev = heap->ops->get_dev(heap);
+			break;
+		}
+	}
+	up_read(&dev->lock);
+
+	return cma_dev;
+}
+EXPORT_SYMBOL(ion_get_heap_dev);
+#endif
+#endif
 
 static void *ion_buffer_kmap_get(struct ion_buffer *buffer)
 {
@@ -257,8 +333,13 @@ static struct sg_table *ion_map_dma_buf(struct dma_buf_attachment *attachment,
 
 	table = a->table;
 
+#ifdef CONFIG_MP_ION_PATCH_PERF
+	if (!dma_map_sg_attrs(attachment->dev, table->sgl, table->nents,
+			      direction, attachment->dma_map_attrs))
+#else
 	if (!dma_map_sg(attachment->dev, table->sgl, table->nents,
 			direction))
+#endif
 		return ERR_PTR(-ENOMEM);
 
 	return table;
@@ -268,7 +349,12 @@ static void ion_unmap_dma_buf(struct dma_buf_attachment *attachment,
 			      struct sg_table *table,
 			      enum dma_data_direction direction)
 {
+#ifdef CONFIG_MP_ION_PATCH_PERF
+	dma_unmap_sg_attrs(attachment->dev, table->sgl, table->nents, direction,
+			   attachment->dma_map_attrs);
+#else
 	dma_unmap_sg(attachment->dev, table->sgl, table->nents, direction);
+#endif
 }
 
 static int ion_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
@@ -300,52 +386,61 @@ static int ion_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 static void ion_dma_buf_release(struct dma_buf *dmabuf)
 {
 	struct ion_buffer *buffer = dmabuf->priv;
-
+#ifdef CONFIG_MP_MMA_ENABLE
+	if(buffer)
+		_ion_buffer_destroy(buffer);
+#else
 	_ion_buffer_destroy(buffer);
+#endif
 }
 
 static void *ion_dma_buf_kmap(struct dma_buf *dmabuf, unsigned long offset)
 {
 	struct ion_buffer *buffer = dmabuf->priv;
+	void *vaddr;
 
-	return buffer->vaddr + offset * PAGE_SIZE;
+	if (!buffer->heap->ops->map_kernel) {
+		pr_err("%s: map kernel is not implemented by this heap.\n",
+		       __func__);
+		return ERR_PTR(-ENOTTY);
+	}
+	mutex_lock(&buffer->lock);
+	vaddr = ion_buffer_kmap_get(buffer);
+	mutex_unlock(&buffer->lock);
+
+	if (IS_ERR(vaddr))
+		return vaddr;
+
+	return vaddr + offset * PAGE_SIZE;
 }
 
 static void ion_dma_buf_kunmap(struct dma_buf *dmabuf, unsigned long offset,
 			       void *ptr)
 {
+	struct ion_buffer *buffer = dmabuf->priv;
+
+	if (buffer->heap->ops->map_kernel) {
+		mutex_lock(&buffer->lock);
+		ion_buffer_kmap_put(buffer);
+		mutex_unlock(&buffer->lock);
+	}
+
 }
 
 static int ion_dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
 					enum dma_data_direction direction)
 {
 	struct ion_buffer *buffer = dmabuf->priv;
-	void *vaddr;
 	struct ion_dma_buf_attachment *a;
-	int ret = 0;
-
-	/*
-	 * TODO: Move this elsewhere because we don't always need a vaddr
-	 */
-	if (buffer->heap->ops->map_kernel) {
-		mutex_lock(&buffer->lock);
-		vaddr = ion_buffer_kmap_get(buffer);
-		if (IS_ERR(vaddr)) {
-			ret = PTR_ERR(vaddr);
-			goto unlock;
-		}
-		mutex_unlock(&buffer->lock);
-	}
 
 	mutex_lock(&buffer->lock);
 	list_for_each_entry(a, &buffer->attachments, list) {
 		dma_sync_sg_for_cpu(a->dev, a->table->sgl, a->table->nents,
 				    direction);
 	}
-
-unlock:
 	mutex_unlock(&buffer->lock);
-	return ret;
+
+	return 0;
 }
 
 static int ion_dma_buf_end_cpu_access(struct dma_buf *dmabuf,
@@ -353,12 +448,6 @@ static int ion_dma_buf_end_cpu_access(struct dma_buf *dmabuf,
 {
 	struct ion_buffer *buffer = dmabuf->priv;
 	struct ion_dma_buf_attachment *a;
-
-	if (buffer->heap->ops->map_kernel) {
-		mutex_lock(&buffer->lock);
-		ion_buffer_kmap_put(buffer);
-		mutex_unlock(&buffer->lock);
-	}
 
 	mutex_lock(&buffer->lock);
 	list_for_each_entry(a, &buffer->attachments, list) {
@@ -383,6 +472,9 @@ static const struct dma_buf_ops dma_buf_ops = {
 	.unmap = ion_dma_buf_kunmap,
 };
 
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+extern unsigned int fakemem_cma_pool_id;
+#endif
 int ion_alloc(size_t len, unsigned int heap_id_mask, unsigned int flags)
 {
 	struct ion_device *dev = internal_dev;
@@ -392,8 +484,18 @@ int ion_alloc(size_t len, unsigned int heap_id_mask, unsigned int flags)
 	int fd;
 	struct dma_buf *dmabuf;
 
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+	if(flags & ION_FLAG_FAKE_MEMORY)    // fake alloc, use fake_heap_id
+		heap_id_mask = 1 << fakemem_cma_pool_id;
+#endif
+
+#ifdef CONFIG_MSTAR_CHIP
+	pr_info("%s: len %zu heap_id_mask %u flags %x\n", __func__,
+		 len, heap_id_mask, flags);
+#else
 	pr_debug("%s: len %zu heap_id_mask %u flags %x\n", __func__,
 		 len, heap_id_mask, flags);
+#endif
 	/*
 	 * traverse the list of heaps available in this system in priority
 	 * order.  If the heap type is supported by the client, and matches the
@@ -408,9 +510,15 @@ int ion_alloc(size_t len, unsigned int heap_id_mask, unsigned int flags)
 	down_read(&dev->lock);
 	plist_for_each_entry(heap, &dev->heaps, node) {
 		/* if the caller didn't specify this heap id */
+#ifdef CONFIG_MSTAR_CHIP
+		if (!((1 << heap->mst_hid) & heap_id_mask))
+			continue;
+		buffer = ion_buffer_create(heap, dev, len, flags, 0);
+#else
 		if (!((1 << heap->id) & heap_id_mask))
 			continue;
 		buffer = ion_buffer_create(heap, dev, len, flags);
+#endif
 		if (!IS_ERR(buffer))
 			break;
 	}
@@ -440,6 +548,31 @@ int ion_alloc(size_t len, unsigned int heap_id_mask, unsigned int flags)
 	return fd;
 }
 
+#if (MP_ION_PATCH_MSTAR == 1)
+unsigned long ion_get_cma_buffer_info(int share_fd)
+{
+	struct dma_buf *show_info_dma_buf;
+	struct ion_buffer *buffer;
+	struct ion_mstar_cma_buffer_info* buffer_info;
+	unsigned long bus_addr = 0;
+
+	show_info_dma_buf = dma_buf_get(share_fd);	// this will do fget, so file->f_count++
+	buffer = show_info_dma_buf->priv;
+
+	// only ion_mstar_cma_allocate() will keep buffer_info @ buffer->priv_virt
+	buffer_info = (struct ion_mstar_cma_buffer_info *)(buffer->priv_virt);
+	bus_addr = (unsigned long)buffer_info->handle;
+	//printk(KERN_EMERG "\033[35mFunction = %s, Line = %d, dma_buf size is 0x%lX\033[m\n", __PRETTY_FUNCTION__, __LINE__, show_info_dma_buf->size);
+	//printk(KERN_EMERG "\033[35mFunction = %s, Line = %d, dma_buf is @ 0x%lX\033[m\n", __PRETTY_FUNCTION__, __LINE__, buffer_info->handle);
+	//printk(KERN_EMERG "\033[35mFunction = %s, Line = %d, dma_buf size @ 0x%lX\033[m\n", __PRETTY_FUNCTION__, __LINE__, buffer_info->size);
+
+	dma_buf_put(show_info_dma_buf);				// release dma_buf, so file->f_count--
+
+	return bus_addr;
+}
+EXPORT_SYMBOL(ion_get_cma_buffer_info);
+#endif
+
 int ion_query_heaps(struct ion_heap_query *query)
 {
 	struct ion_device *dev = internal_dev;
@@ -466,7 +599,11 @@ int ion_query_heaps(struct ion_heap_query *query)
 		strncpy(hdata.name, heap->name, MAX_HEAP_NAME);
 		hdata.name[sizeof(hdata.name) - 1] = '\0';
 		hdata.type = heap->type;
+#ifdef CONFIG_MSTAR_CHIP
+		hdata.heap_id = heap->mst_hid;
+#else
 		hdata.heap_id = heap->id;
+#endif
 
 		if (copy_to_user(&buffer[cnt], &hdata, sizeof(hdata))) {
 			ret = -EFAULT;

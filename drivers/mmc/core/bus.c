@@ -146,11 +146,19 @@ static void mmc_bus_shutdown(struct device *dev)
 }
 
 #ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+static struct str_waitfor_dev waitfor;
+#endif
 static int mmc_bus_suspend(struct device *dev)
 {
 	struct mmc_card *card = mmc_dev_to_card(dev);
 	struct mmc_host *host = card->host;
 	int ret;
+
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+	if (waitfor.stage1_s_wait)
+		wait_for_completion(&(waitfor.stage1_s_wait->power.completion));
+#endif
 
 	ret = pm_generic_suspend(dev);
 	if (ret)
@@ -168,6 +176,11 @@ static int mmc_bus_resume(struct device *dev)
 	struct mmc_card *card = mmc_dev_to_card(dev);
 	struct mmc_host *host = card->host;
 	int ret;
+
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+	if (waitfor.stage1_r_wait)
+		wait_for_completion(&(waitfor.stage1_r_wait->power.completion));
+#endif
 
 	ret = host->bus_ops->resume(host);
 	if (ret)
@@ -199,7 +212,9 @@ static int mmc_runtime_resume(struct device *dev)
 
 static const struct dev_pm_ops mmc_bus_pm_ops = {
 	SET_RUNTIME_PM_OPS(mmc_runtime_suspend, mmc_runtime_resume, NULL)
+#ifndef CONFIG_MP_MSTAR_STR_OF_ORDER
 	SET_SYSTEM_SLEEP_PM_OPS(mmc_bus_suspend, mmc_bus_resume)
+#endif
 };
 
 static struct bus_type mmc_bus_type = {
@@ -215,6 +230,12 @@ static struct bus_type mmc_bus_type = {
 
 int mmc_register_bus(void)
 {
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+	of_mstar_str("mmcbus", NULL,
+		&mmc_bus_pm_ops, &waitfor,
+		&mmc_bus_suspend,
+		&mmc_bus_resume, NULL, NULL);
+#endif
 	return bus_register(&mmc_bus_type);
 }
 

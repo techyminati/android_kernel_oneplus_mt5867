@@ -11,6 +11,70 @@
 #include <linux/serial_reg.h>
 #include <linux/dmaengine.h>
 
+#define DYNAMIC_BAUDRATE_CHANGE_ENABLE      (0)
+#define  RTSCTS 0
+
+/*
+ * We default to IRQ0 for the "no irq" hack.   Some
+ * machine types want others as well - they're free
+ * to redefine this in their header file.
+ */
+//#define is_real_interrupt(irq)    ((irq) != 0)
+#define is_real_interrupt(irq)  (1)
+
+/* This should be at first. */
+/* As Mstar 16550 has different register's address */
+#undef UART_RX
+#undef UART_TX
+#undef UART_DLL
+#undef UART_DLM
+#undef UART_IER
+#undef UART_IIR
+#undef UART_FCR
+#undef UART_LCR
+#undef UART_MCR
+#undef UART_LSR
+#undef UART_MSR
+
+#define MSTAR_UART_RX          (0x00)
+#define MSTAR_UART_TX          (0x00)
+#define MSTAR_UART_DLL         (0x00)
+#define MSTAR_UART_DLM         (0x02)
+#define MSTAR_UART_IER         (0x02)
+#define MSTAR_UART_IIR         (0x04)
+#define MSTAR_UART_FCR         (0x04)
+#define MSTAR_UART_LCR         (0x06)
+#define MSTAR_UART_MCR         (0x08)
+#define MSTAR_UART_LSR         (0x0A)
+#define MSTAR_UART_MSR         (0x0C)
+#define MSTAR_UART_USR         (0x0E)
+#define MSTAR_UART_BUSY                (0x01)
+#define MSTAR_UART_RX_BUSY             (0x18)
+#define MSTAR_UART_SWRST                       (0x14)
+#define MSTAR_UART_RST_DISABLE         (1)
+#define MSTAR_UART_RST_ENABLE          (0)
+
+#define UART_RX  MSTAR_UART_RX
+#define UART_TX  MSTAR_UART_TX
+#define UART_DLL MSTAR_UART_DLL
+#define UART_DLM MSTAR_UART_DLM
+#define UART_IER MSTAR_UART_IER
+#define UART_IIR MSTAR_UART_IIR
+#define UART_FCR MSTAR_UART_FCR
+#define UART_LCR MSTAR_UART_LCR
+#define UART_MCR MSTAR_UART_MCR
+#define UART_LSR MSTAR_UART_LSR
+#define UART_MSR MSTAR_UART_MSR
+
+#define UART_DIVISOR_H(x)                               (x >> 8)
+#define UART_DIVISOR_L(x)                               (x & 0xff)
+
+#define CHIPTOP_RIU                    (RIU_VIRT_BASE + 0x203C00)
+#define UART_SEL                       (0x53)
+#define UART1_DISABLE          (0x00F0)
+#define UART1_ENABLE           (0xFF5F)
+#define UART_REG(iobase, addr) *((volatile unsigned short*)(iobase + ((addr)<< 2)))
+
 struct uart_8250_dma {
 	int (*tx_dma)(struct uart_8250_port *p);
 	int (*rx_dma)(struct uart_8250_port *p);
@@ -233,23 +297,6 @@ static inline int serial8250_request_dma(struct uart_8250_port *p)
 }
 static inline void serial8250_release_dma(struct uart_8250_port *p) { }
 #endif
-
-static inline int ns16550a_goto_highspeed(struct uart_8250_port *up)
-{
-	unsigned char status;
-
-	status = serial_in(up, 0x04); /* EXCR2 */
-#define PRESL(x) ((x) & 0x30)
-	if (PRESL(status) == 0x10) {
-		/* already in high speed mode */
-		return 0;
-	} else {
-		status &= ~0xB0; /* Disable LOCK, mask out PRESL[01] */
-		status |= 0x10;  /* 1.625 divisor for baud_base --> 921600 */
-		serial_out(up, 0x04, status);
-	}
-	return 1;
-}
 
 static inline int serial_index(struct uart_port *port)
 {

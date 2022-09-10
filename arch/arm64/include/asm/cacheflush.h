@@ -21,6 +21,7 @@
 
 #include <linux/kgdb.h>
 #include <linux/mm.h>
+#include <asm/outercache.h>
 
 /*
  * This flag is used to indicate that the page pointed to by a pte is clean
@@ -79,6 +80,11 @@
 extern void flush_cache_all(void);
 extern void __flush_icache_range(unsigned long start, unsigned long end);
 extern int  invalidate_icache_range(unsigned long start, unsigned long end);
+#if defined(CONFIG_PLAT_MSTAR)
+#define __cpuc_flush_kern_all           flush_cache_all
+#define __cpuc_flush_dcache_area        __flush_dcache_area
+extern void flush_cache_all(void);
+#endif
 extern void __flush_dcache_area(void *addr, size_t len);
 extern void __inval_dcache_area(void *addr, size_t len);
 extern void __clean_dcache_area_poc(void *addr, size_t len);
@@ -86,6 +92,12 @@ extern void __clean_dcache_area_pop(void *addr, size_t len);
 extern void __clean_dcache_area_pou(void *addr, size_t len);
 extern long __flush_cache_user_range(unsigned long start, unsigned long end);
 extern void sync_icache_aliases(void *kaddr, unsigned long len);
+#if defined(CONFIG_PLAT_MSTAR)
+/* FIXME: see cache.S */
+extern void dmac_map_area(const void *, size_t, int);
+extern void dmac_unmap_area(const void *, size_t, int);
+extern void dmac_flush_range(const void *, const void *);
+#endif
 
 static inline void flush_icache_range(unsigned long start, unsigned long end)
 {

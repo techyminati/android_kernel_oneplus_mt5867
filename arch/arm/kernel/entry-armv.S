@@ -42,12 +42,18 @@
 #ifdef CONFIG_GENERIC_IRQ_MULTI_HANDLER
 	ldr	r1, =handle_arch_irq
 	mov	r0, sp
+#ifdef CONFIG_MP_IRQ_STACK
+	irq_stack_entry
+#endif
 	badr	lr, 9997f
 	ldr	pc, [r1]
 #else
 	arch_irq_handler_default
 #endif
 9997:
+#if defined(CONFIG_GENERIC_IRQ_MULTI_HANDLER) && defined(CONFIG_MP_IRQ_STACK)
+	irq_stack_exit
+#endif
 	.endm
 
 	.macro	pabt_helper
@@ -180,10 +186,17 @@ ENDPROC(__und_invalid)
 	@  r6 - orig_r0 (see pt_regs definition in ptrace.h)
 	@
 	stmia	r7, {r2 - r6}
-
+#ifndef CONFIG_MP_IRQ_STACK
 	get_thread_info tsk
+#else
+	get_thread_info 1, tsk
+#endif
 	ldr	r0, [tsk, #TI_ADDR_LIMIT]
+#ifdef CONFIG_KASAN
+	ldr	r1, =TASK_SIZE
+#else
 	mov	r1, #TASK_SIZE
+#endif
 	str	r1, [tsk, #TI_ADDR_LIMIT]
 	str	r0, [sp, #SVC_ADDR_LIMIT]
 
@@ -291,7 +304,11 @@ __und_svc_fault:
 	bl	__und_fault
 
 __und_svc_finish:
+#ifndef CONFIG_MP_IRQ_STACK
 	get_thread_info tsk
+#else
+	get_thread_info 1, tsk
+#endif
 	ldr	r5, [sp, #S_PSR]		@ Get SVC cpsr
 	svc_exit r5				@ return from exception
  UNWIND(.fnend		)
@@ -437,7 +454,12 @@ ENDPROC(__fiq_abt)
 	@ if it was interrupted in a critical region.  Here we
 	@ perform a quick test inline since it should be false
 	@ 99.9999% of the time.  The rest is done out of line.
+#ifdef CONFIG_KASAN
+	ldr	r0, =TASK_SIZE
+	cmp	r4, r0
+#else
 	cmp	r4, #TASK_SIZE
+#endif
 	blhs	kuser_cmpxchg64_fixup
 #endif
 #endif
@@ -458,7 +480,11 @@ __irq_usr:
 	usr_entry
 	kuser_cmpxchg_check
 	irq_handler
+#ifndef CONFIG_MP_IRQ_STACK
 	get_thread_info tsk
+#else
+	get_thread_info 1, tsk
+#endif
 	mov	why, #0
 	b	ret_to_user_from_irq
  UNWIND(.fnend		)
@@ -602,12 +628,20 @@ ENDPROC(__und_usr)
 	@ Fall-through from Thumb-2 __und_usr
 	@
 #ifdef CONFIG_NEON
+#ifndef CONFIG_MP_IRQ_STACK
 	get_thread_info r10			@ get current thread
+#else
+	get_thread_info 1, r10                  @ get current thread
+#endif
 	adr	r6, .LCneon_thumb_opcodes
 	b	2f
 #endif
 call_fpe:
+#ifndef CONFIG_MP_IRQ_STACK
 	get_thread_info r10			@ get current thread
+#else
+	get_thread_info 1, r10                  @ get current thread
+#endif
 #ifdef CONFIG_NEON
 	adr	r6, .LCneon_arm_opcodes
 2:	ldr	r5, [r6], #4			@ mask value
@@ -752,7 +786,11 @@ __pabt_usr:
 ENTRY(ret_from_exception)
  UNWIND(.fnstart	)
  UNWIND(.cantunwind	)
+#ifndef CONFIG_MP_IRQ_STACK
 	get_thread_info tsk
+#else
+	get_thread_info 1, tsk
+#endif
 	mov	why, #0
 	b	ret_to_user
  UNWIND(.fnend		)
@@ -765,7 +803,11 @@ __fiq_usr:
 	kuser_cmpxchg_check
 	mov	r0, sp				@ struct pt_regs *regs
 	bl	handle_fiq_as_nmi
+#ifndef CONFIG_MP_IRQ_STACK
 	get_thread_info tsk
+#else
+	get_thread_info 1, tsk
+#endif
 	restore_user_regs fast = 0, offset = 0
  UNWIND(.fnend		)
 ENDPROC(__fiq_usr)
@@ -812,6 +854,20 @@ ENTRY(__switch_to)
 #endif
  THUMB(	mov	ip, r4			   )
 	mov	r0, r5
+#ifdef CONFIG_MP_IRQ_STACK
+	mrs	r7, cpsr	@ Irq Save
+	cpsid	i		@ Disable Irq
+	mrc	p15, 0, r5, c0, c0, 5
+#ifdef CONFIG_MP_IRQ_STACK_WITH_FCM
+	lsr	r5, r5, #8
+#endif
+	and	r5, r5, #0xff
+	ldr	r6, =sp_mtk
+	add	r6, r6, r5, lsl #2
+	ldr	r5, [r4, #32]
+	str	r5, [r6]
+	msr	cpsr_c, r7	@ Irq Restore
+#endif
  ARM(	ldmia	r4, {r4 - sl, fp, sp, pc}  )	@ Load all regs saved previously
  THUMB(	ldmia	ip!, {r4 - sl, fp}	   )	@ Load all regs saved previously
  THUMB(	ldr	sp, [ip], #4		   )
@@ -819,6 +875,28 @@ ENTRY(__switch_to)
  UNWIND(.fnend		)
 ENDPROC(__switch_to)
 
+#ifdef CONFIG_MP_IRQ_STACK
+ENTRY(current_thread_info)
+	mov	ip, sp
+	push	{r1-r2, fp, ip, lr, pc}
+	sub	fp, ip, #4
+	mrs	r2, cpsr		@ Irq Save
+	cpsid	i			@ Disable Irq
+	mrc	p15, 0, r0, c0, c0, 5
+#ifdef CONFIG_MP_IRQ_STACK_WITH_FCM
+	lsr	r0, r0, #8
+#endif
+	and	r0, r0, #0xff
+	ldr	r1, =sp_mtk
+	add	r1, r1, r0, lsl #2
+	ldr	r0, [r1]
+	msr	cpsr_c, r2		@ Irq Restore
+	mov	r0, r0, lsr #THREAD_SIZE_ORDER + PAGE_SHIFT
+	mov	r0, r0, lsl #THREAD_SIZE_ORDER + PAGE_SHIFT
+	ldm	sp, {r1-r2, fp, sp, pc}
+ENDPROC(current_thread_info)
+	.ltorg
+#endif
 	__INIT
 
 /*

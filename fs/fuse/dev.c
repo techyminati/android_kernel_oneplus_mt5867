@@ -1356,6 +1356,13 @@ static int fuse_dev_open(struct inode *inode, struct file *file)
 	 * keep track of whether the file has been mounted already.
 	 */
 	file->private_data = NULL;
+#if defined(CONFIG_MP_MSTAR_STR_PROCESS_FREEZE_LATE)
+	current->flags |= PF_FREEZE_LATE;
+#if defined(CONFIG_MP_MSTAR_STR_PROCESS_FREEZE_LATE_DEBUG)
+	printk(KERN_DEBUG "fuse:after set PF_FREEZE_LATE to %s pid=%5d flag=0x%08lx\n",
+		current->comm, task_pid_nr(current), current->flags);
+#endif
+#endif
 	return 0;
 }
 
@@ -2204,6 +2211,13 @@ int fuse_dev_release(struct inode *inode, struct file *file)
 		}
 		fuse_dev_free(fud);
 	}
+#if defined(CONFIG_MP_MSTAR_STR_PROCESS_FREEZE_LATE)
+	current->flags &= ~PF_FREEZE_LATE;
+#if defined(CONFIG_MP_MSTAR_STR_PROCESS_FREEZE_LATE_DEBUG)
+	printk(KERN_DEBUG "fuse:after clear PF_FREEZE_LATE from %s pid=%5d flag=0x%08lx\n",
+		current->comm, task_pid_nr(current), current->flags);
+#endif
+#endif
 	return 0;
 }
 EXPORT_SYMBOL_GPL(fuse_dev_release);

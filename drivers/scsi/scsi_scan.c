@@ -1266,7 +1266,12 @@ static void scsi_sequential_lun_scan(struct scsi_target *starget,
 	 * until we reach the max, or no LUN is found and we are not
 	 * sparse_lun.
 	 */
+#if (MP_SCSI_MULTI_LUN == 1)
+	//BUGFIX: max_dev_lun is the max num from 0, not from 1. So we must use less-equal
+	for (lun = 1; lun <= max_dev_lun; ++lun)
+#else
 	for (lun = 1; lun < max_dev_lun; ++lun)
+#endif
 		if ((scsi_probe_and_add_lun(starget, lun, NULL, NULL, rescan,
 					    NULL) != SCSI_SCAN_LUN_PRESENT) &&
 		    !sparse_lun)

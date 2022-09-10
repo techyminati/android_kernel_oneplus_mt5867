@@ -49,7 +49,7 @@
 #include <linux/module.h>
 #include <linux/ratelimit.h>
 #include <linux/vmalloc.h>
-
+#include <mstar/mpatch_macro.h>
 
 /* number of characters left in xmit buffer before select has we have room */
 #define WAKEUP_CHARS 256
@@ -151,6 +151,8 @@ static inline unsigned char *echo_buf_addr(struct n_tty_data *ldata, size_t i)
 {
 	return &ldata->echo_buf[i & (N_TTY_BUF_SIZE - 1)];
 }
+/* VDLinux, based SELP.Mstar default patch No.15,
+   n_tty serial input disable, SP Team 2010-01-29 */
 
 /* If we are not echoing the data, perhaps this is a secret so erase it */
 static void zero_buffer(struct tty_struct *tty, u8 *buffer, int size)
@@ -1701,6 +1703,13 @@ n_tty_receive_buf_common(struct tty_struct *tty, const unsigned char *cp,
 	int room, n, rcvd = 0, overflow;
 
 	down_read(&tty->termios_rwsem);
+
+#ifdef CONFIG_MSTAR_CHIP
+	if (!ldata || !tty->driver_data) {
+		up_read(&tty->termios_rwsem);
+		return 0;
+	}
+#endif
 
 	do {
 		/*

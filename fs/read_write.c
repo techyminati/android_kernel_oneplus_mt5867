@@ -462,6 +462,34 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 
 EXPORT_SYMBOL_GPL(vfs_read);
 
+ssize_t vfs_read1(struct file *file, char __user *buf, size_t count, loff_t *pos)
+{
+	ssize_t ret;
+
+	if (!(file->f_mode & FMODE_READ))
+		return -EBADF;
+	if (!(file->f_mode & FMODE_CAN_READ))
+		return -EINVAL;
+	if (unlikely(!access_ok(VERIFY_WRITE, buf, count)))
+		return -EFAULT;
+
+	ret = rw_verify_area(READ, file, pos, count);
+	if (!ret) {
+		if (count > MAX_RW_COUNT)
+			count =  MAX_RW_COUNT;
+		ret = __vfs_read(file, buf, count, pos);
+		if (ret > 0) {
+			fsnotify_access(file);
+			add_rchar(current, ret);
+		}
+		inc_syscr(current);
+	}
+
+	return ret;
+}
+
+EXPORT_SYMBOL(vfs_read1);
+
 static ssize_t new_sync_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos)
 {
 	struct iovec iov = { .iov_base = (void __user *)buf, .iov_len = len };

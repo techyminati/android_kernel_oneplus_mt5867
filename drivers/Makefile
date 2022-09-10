@@ -165,6 +165,7 @@ obj-$(CONFIG_HYPERV)		+= hv/
 
 obj-$(CONFIG_PM_DEVFREQ)	+= devfreq/
 obj-$(CONFIG_EXTCON)		+= extcon/
+obj-$(CONFIG_SWITCH)		+= switch/
 obj-$(CONFIG_MEMORY)		+= memory/
 obj-$(CONFIG_IIO)		+= iio/
 obj-$(CONFIG_VME_BUS)		+= vme/
@@ -188,3 +189,12 @@ obj-$(CONFIG_MULTIPLEXER)	+= mux/
 obj-$(CONFIG_UNISYS_VISORBUS)	+= visorbus/
 obj-$(CONFIG_SIOX)		+= siox/
 obj-$(CONFIG_GNSS)		+= gnss/
+
+# Add for Mstar chip
+obj-$(CONFIG_MSTAR_CHIP)        += mstar2/
+obj-$(CONFIG_MSTAR_3RD_PARTY)	+= mstar3party/
+
+ifneq ($(CONFIG_GATOR),)
+obj-$(CONFIG_GATOR)		+= gator/
+endif
+obj-$(CONFIG_SMAF)		+= smaf/

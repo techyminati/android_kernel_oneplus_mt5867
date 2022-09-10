@@ -184,7 +184,11 @@ int console_blanked;
 
 static int vesa_blank_mode; /* 0:none 1:suspendV 2:suspendH 3:powerdown */
 static int vesa_off_interval;
+#ifdef CONFIG_MSTAR_CHIP
+static int blankinterval = 10*60;
+#else
 static int blankinterval;
+#endif
 core_param(consoleblank, blankinterval, int, 0444);
 
 static DECLARE_WORK(console_work, console_callback);
@@ -4288,8 +4292,14 @@ void unblank_screen(void)
  */
 static void blank_screen_t(struct timer_list *unused)
 {
+#ifndef CONFIG_MSTAR_CHIP
+	/*
+	 * prevent system from turning off the backlight after idling blankinterval time.
+	 * remove the code as we will not be using this feature.
+	 */
 	blank_timer_expired = 1;
 	schedule_work(&console_work);
+#endif
 }
 
 void poke_blanked_console(void)

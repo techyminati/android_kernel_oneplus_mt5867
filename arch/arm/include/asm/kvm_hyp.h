@@ -36,6 +36,7 @@
 	__val;							\
 })
 
+#ifndef CONFIG_KASAN
 #define TTBR0		__ACCESS_CP15_64(0, c2)
 #define TTBR1		__ACCESS_CP15_64(1, c2)
 #define VTTBR		__ACCESS_CP15_64(6, c2)
@@ -87,6 +88,7 @@
 #define CNTKCTL		__ACCESS_CP15(c14, 0, c1, 0)
 #define CNTV_CTL	__ACCESS_CP15(c14, 0, c3, 1)
 #define CNTHCTL		__ACCESS_CP15(c14, 4, c1, 0)
+#endif
 
 #define VFP_FPEXC	__ACCESS_VFP(FPEXC)
 

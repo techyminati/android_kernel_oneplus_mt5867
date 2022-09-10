@@ -149,7 +149,11 @@ struct platform_device *of_device_alloc(struct device_node *np,
 
 	dev->dev.of_node = of_node_get(np);
 	dev->dev.fwnode = &np->fwnode;
-	dev->dev.parent = parent ? : &platform_bus;
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+	dev->dev.parent = parent;
+#else
+	dev->dev.parent = parent ? : &platform_bus;	// do not use this, due to per_chip_fstab (align to 3.10.86)
+#endif
 
 	if (bus_id)
 		dev_set_name(&dev->dev, "%s", bus_id);
@@ -250,7 +254,11 @@ static struct amba_device *of_amba_device_create(struct device_node *node,
 	/* setup generic device info */
 	dev->dev.of_node = of_node_get(node);
 	dev->dev.fwnode = &node->fwnode;
-	dev->dev.parent = parent ? : &platform_bus;
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+	dev->dev.parent = parent;
+#else
+	dev->dev.parent = parent ? : &platform_bus;	// do not use this, due to per_chip_fstab (align to 3.10.86)
+#endif
 	dev->dev.platform_data = platform_data;
 	if (bus_id)
 		dev_set_name(&dev->dev, "%s", bus_id);

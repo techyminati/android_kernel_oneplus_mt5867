@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0
 # Makefile for the Linux device tree
 
+ifeq ($(CONFIG_MP_CMA_PATCH_CMA_MSTAR_DRIVER_BUFFER),y)
+EXTRA_CFLAGS      +=  -Idrivers/mstar2/include
+EXTRA_CFLAGS      +=  -Imm
+endif
+
 obj-y			:= component.o core.o bus.o dd.o syscore.o \
 			   driver.o class.o platform.o \
 			   cpu.o firmware.o init.o map.o devres.o \

@@ -44,6 +44,9 @@ void ubi_do_get_device_info(struct ubi_device *ubi, struct ubi_device_info *di)
 	di->min_io_size = ubi->min_io_size;
 	di->max_write_size = ubi->max_write_size;
 	di->ro_mode = ubi->ro_mode;
+#if (MP_NAND_UBI == 1)
+	di->is_mlc = ubi->is_mlc;
+#endif
 	di->cdev = ubi->cdev.dev;
 }
 EXPORT_SYMBOL_GPL(ubi_do_get_device_info);
@@ -458,6 +461,47 @@ int ubi_leb_read(struct ubi_volume_desc *desc, int lnum, char *buf, int offset,
 }
 EXPORT_SYMBOL_GPL(ubi_leb_read);
 
+#if (MP_NAND_UBI == 1)
+/*
+* This function checks a page's property
+* 1: lsb page; 0: msb page
+*/
+int ubi_is_mlc_lsbpage(struct ubi_volume_desc *desc, int offset)
+{
+	struct ubi_volume *vol = desc->vol;
+	struct ubi_device *ubi = vol->ubi;
+
+	dbg_gen("check offset %d", offset);
+
+	if ((offset < 0) ||
+	    (offset > vol->usable_leb_size) ||
+	    (offset & (ubi->min_io_size - 1)))
+		return -EINVAL;
+
+	return ubi_eba_is_mlc_lsbpage(ubi, offset);
+}
+EXPORT_SYMBOL_GPL(ubi_is_mlc_lsbpage);
+
+/*
+* This function returns a page's paired page
+* for slc, returns offset itself
+*/
+int ubi_mlc_pairedpage(struct ubi_volume_desc *desc, int offset)
+{
+	struct ubi_volume *vol = desc->vol;
+	struct ubi_device *ubi = vol->ubi;
+
+	dbg_gen("check offset %d", offset);
+
+	if ((offset < 0) ||
+	    (offset > vol->usable_leb_size) ||
+	    (offset & (ubi->min_io_size - 1)))
+		return -EINVAL;
+
+	return ubi_eba_mlc_pairedpage(ubi, offset);
+}
+EXPORT_SYMBOL_GPL(ubi_mlc_pairedpage);
+#endif
 
 /**
  * ubi_leb_read_sg - read data into a scatter gather list.

@@ -26,6 +26,10 @@
 #include <linux/interrupt.h>
 #include <linux/idr.h>
 
+#ifndef MP_USB_MSTAR
+#include <mstar/mpatch_macro.h>
+#endif
+
 #define MAX_TOPO_LEVEL		6
 
 /* This file contains declarations of usbcore internals that are mostly
@@ -53,6 +57,26 @@
 #define USB_PID_STALL			0x1e
 #define USB_PID_MDATA			0x0f	/* USB 2.0 */
 
+#if (MP_USB_MSTAR==1)
+//usb port power control
+struct usb_ppc {
+	uintptr_t	port_addr;
+	u8	bit_addr;
+	u8	out_en_bit_addr;
+	u8	out_en_hi_active;
+	u8	reserved[1];
+};
+
+struct usb_utmi_param {
+	u8	disconnect;
+	u8	squelch;
+	u8	chirp;
+	u8	eye_param[4];
+	u32	dpdm_swap;
+	u32	otg_enable;
+};
+#endif /* MP_USB_MSTAR */
+
 /*-------------------------------------------------------------------------*/
 
 /*
@@ -63,6 +87,14 @@
  */
 
 /*-------------------------------------------------------------------------*/
+
+#if (MP_USB_MSTAR==1)
+struct comp_port {
+	uintptr_t	comp_port_addr;
+	uintptr_t	u3top_base;
+	u8	port_index;
+};
+#endif
 
 struct giveback_urb_bh {
 	bool running;
@@ -210,6 +242,45 @@ struct usb_hcd {
 
 #define	HC_IS_RUNNING(state) ((state) & __ACTIVE)
 #define	HC_IS_SUSPENDED(state) ((state) & __SUSPEND)
+
+#if (MP_USB_MSTAR==1)
+	u32		port_index;
+	uintptr_t	utmi_base;
+	uintptr_t	ehc_base;
+	uintptr_t	usbc_base;
+	uintptr_t	bc_base;
+
+	uintptr_t	xhci_base;
+	uintptr_t	u3top_base;
+	uintptr_t	u3dphy_base[2];
+	struct comp_port	companion;
+	u32		ms_flag;
+	u32		utmi_flag;
+/* ms_flag bit16 ~ bit31 for sw frame index  */
+#define	MS_FLAG_P0_SSC	1<<0
+#define MS_FLAG_P1_SSC	1<<1
+#define MS_FLAG_SW_FRM_IDX	1<<2
+#define MS_FLAG_FAST_CONNECT 1<<3
+#define MS_FLAG_PMPORT (1<<4)
+
+	int		root_port_devnum;
+	u8		enum_port_flag;
+	u8		enum_dbreset_flag;
+	u8		rootflag;
+
+	/* reserved for future usage */
+	u32		reserved8;
+	u32		reserved7;
+	u32		reserved6;
+	u32		reserved5;
+	u32		reserved4;
+	u32		reserved3;
+	u32		reserved2;
+	u32		reserved1;
+
+	struct usb_ppc	ppc;
+	struct usb_utmi_param	utmi_param;
+#endif /* MP_USB_MSTAR */
 
 	/* more shared queuing code would be good; it should support
 	 * smarter scheduling, handle transaction translators, etc;

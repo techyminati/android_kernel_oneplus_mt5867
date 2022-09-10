@@ -46,8 +46,41 @@ static const unsigned long vmpressure_win = SWAP_CLUSTER_MAX * 16;
  * essence, they are percents: the higher the value, the more number
  * unsuccessful reclaims there were.
  */
+#ifdef CONFIG_MSTAR_CHIP
+static unsigned int vmpressure_level_med __read_mostly = 60;
+static unsigned int vmpressure_level_critical __read_mostly = 95;
+
+static int __init vmp_med_setup(char *s)
+{
+	unsigned int n = (unsigned int)simple_strtol(s, NULL, 0);
+
+	if (n > 95) {
+		pr_err("invalid vmpressure_level_med %u\n", n);
+		return -EINVAL;
+	}
+
+	vmpressure_level_med = n;
+	return 0;
+}
+early_param("vmpressure_level_med", vmp_med_setup);
+
+static int __init vmp_critical_setup(char *s)
+{
+	unsigned int n = simple_strtol(s, NULL, 0);
+
+	if (n > 95 || n < vmpressure_level_med) {
+		pr_err("invalid vmpressure_level_med %u\n", n);
+		return -EINVAL;
+	}
+
+	vmpressure_level_critical = n;
+	return 0;
+}
+early_param("vmpressure_level_critical", vmp_critical_setup);
+#else
 static const unsigned int vmpressure_level_med = 60;
 static const unsigned int vmpressure_level_critical = 95;
+#endif
 
 /*
  * When there are too little pages left to scan, vmpressure() may miss the

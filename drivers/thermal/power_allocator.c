@@ -30,6 +30,17 @@
 #define int_to_frac(x) ((x) << FRAC_BITS)
 #define frac_to_int(x) ((x) >> FRAC_BITS)
 
+#if defined CONFIG_MP_IPA_BOOST_CLIENT_FIRST_PRIORITY
+#if defined CONFIG_MSTAR_CPU_calibrating
+extern bool is_any_boost_client_running();
+#endif
+#if defined CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING
+extern bool is_any_boost_client_running(int);
+#endif
+#endif
+#if defined CONFIG_MP_IPA_WITH_MSTAR_THERMAL_PROTECT
+#include "mdrv_dvfs.h"
+#endif
 /**
  * mul_frac() - multiply two fixed-point numbers
  * @x:	first multiplicand
@@ -615,6 +626,33 @@ static int power_allocator_throttle(struct thermal_zone_device *tz, int trip)
 	int switch_on_temp, control_temp;
 	struct power_allocator_params *params = tz->governor_data;
 
+        // mstar patch : boost client priority > IPA
+#if defined CONFIG_MP_IPA_BOOST_CLIENT_FIRST_PRIORITY
+#if defined CONFIG_MSTAR_CPU_calibrating
+        if (is_any_boost_client_running() == true)
+            return 0;
+#endif
+
+#if CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING
+        int cpu;
+        for_each_possible_cpu(cpu)
+	{
+            if (is_any_boost_client_running(cpu) == true)
+                return 0;
+	}
+#endif
+#endif
+
+#if defined CONFIG_MP_IPA_WITH_MSTAR_THERMAL_PROTECT
+        int count;
+        int dwCluster;
+        for_each_possible_cpu(count)
+	{
+            dwCluster = getCpuCluster(count);
+            if (MDrvDvfsGetOverTemperatureFlag(count) == 1)
+               return 0;
+	}
+#endif
 	/*
 	 * We get called for every trip point but we only need to do
 	 * our calculations once

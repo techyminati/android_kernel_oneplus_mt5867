@@ -1269,6 +1269,12 @@ static inline void fpsimd_hotplug_init(void)
 				  NULL, fpsimd_cpu_dead);
 }
 
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+void fpsimd_clear_state(void)
+{
+	this_cpu_write(fpsimd_last_state, NULL);
+}
+#endif
 #else
 static inline void fpsimd_hotplug_init(void) { }
 #endif

@@ -53,6 +53,7 @@
 
 #include <asm/ptrace.h>
 #include <asm/irq_regs.h>
+//#include <stdlib.h>
 
 /* Whether we react on sysrq keys or just ignore them */
 static int __read_mostly sysrq_enabled = CONFIG_MAGIC_SYSRQ_DEFAULT_ENABLE;
@@ -134,6 +135,9 @@ static struct sysrq_key_op sysrq_unraw_op = {
 
 static void sysrq_handle_crash(int key)
 {
+	printk(KERN_ALERT "dump_stack start\n");
+	dump_stack();
+	printk(KERN_ALERT "dump_stack end\n");
 	char *killer = NULL;
 
 	/* we need to release the RCU read lock here,
@@ -155,6 +159,30 @@ static struct sysrq_key_op sysrq_crash_op = {
 
 static void sysrq_handle_reboot(int key)
 {
+    //setenv("force_onetime_direct", "1", 1);
+    mm_segment_t old_fs;
+    loff_t off = 0;
+    char *sCmdStr = "boot-poweron";
+    struct file *fd;
+    size_t t;
+
+    old_fs = get_fs();
+    set_fs(KERNEL_DS);
+
+    fd = filp_open("/dev/block/platform/mstar_mci.0/by-name/misc", O_RDWR, 0);
+    if(!IS_ERR(fd))
+    {
+        t = vfs_write(fd, sCmdStr, strlen(sCmdStr)+1, &off);
+        printk(KERN_ERR "write to \"/dev/block/platform/mstar_mci.0/by-name/misc\" %ld bytes\n", (long int)t);
+        vfs_fsync(fd, 0);
+        filp_close(fd, NULL);
+    }
+    else
+    {
+        printk(KERN_ERR "open \"/dev/block/platform/mstar_mci.0/by-name/misc\" failed\n");
+    }
+    set_fs(old_fs);
+
 	lockdep_off();
 	local_irq_enable();
 	emergency_restart();

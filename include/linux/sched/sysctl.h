@@ -27,6 +27,13 @@ extern unsigned int sysctl_sched_cstate_aware;
 extern unsigned int sysctl_sched_wakeup_granularity;
 extern unsigned int sysctl_sched_child_runs_first;
 
+#if defined(CONFIG_MP_AUDIO_DECODE_PERFORMANCE)
+extern unsigned int sysctl_enable_audio_decoding;
+extern unsigned int sysctl_enable_audio_decode_scheduler;
+extern unsigned int sysctl_bind_android_bg;
+extern char sysctl_audio_process_name[TASK_COMM_LEN];
+#endif
+
 enum sched_tunable_scaling {
 	SCHED_TUNABLESCALING_NONE,
 	SCHED_TUNABLESCALING_LOG,

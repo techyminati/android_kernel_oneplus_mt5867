@@ -288,6 +288,11 @@ void __kasan_report(unsigned long addr, size_t size, bool is_write, unsigned lon
 	void *untagged_addr;
 	unsigned long flags;
 
+#ifdef CONFIG_ARM
+	if (unlikely(!kasan_initialized))
+		return;
+#endif
+
 	if (likely(!report_enabled()))
 		return;
 

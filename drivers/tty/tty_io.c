@@ -105,6 +105,7 @@
 #include <linux/selection.h>
 
 #include <linux/kmod.h>
+#include <mstar/mpatch_macro.h>
 #include <linux/nsproxy.h>
 
 #undef TTY_DEBUG_HANGUP
@@ -1042,6 +1043,7 @@ static ssize_t tty_write(struct file *file, const char __user *buf,
 		ret = -EIO;
 	else
 		ret = do_tty_write(ld->ops->write, tty, file, buf, count);
+
 	tty_ldisc_deref(ld);
 	return ret;
 }
@@ -2747,10 +2749,14 @@ void __do_SAK(struct tty_struct *tty)
 	struct task_struct *g, *p;
 	struct pid *session;
 	int		i;
+	unsigned long flags;
 
 	if (!tty)
 		return;
-	session = tty->session;
+
+	spin_lock_irqsave(&tty->ctrl_lock, flags);
+	session = get_pid(tty->session);
+	spin_unlock_irqrestore(&tty->ctrl_lock, flags);
 
 	tty_ldisc_flush(tty);
 
@@ -2782,6 +2788,7 @@ void __do_SAK(struct tty_struct *tty)
 		task_unlock(p);
 	} while_each_thread(g, p);
 	read_unlock(&tasklist_lock);
+	put_pid(session);
 #endif
 }
 

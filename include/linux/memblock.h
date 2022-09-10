@@ -359,7 +359,9 @@ extern void __memblock_dump_all(void);
 
 static inline void memblock_dump_all(void)
 {
+#ifndef CONFIG_PLAT_MSTAR
 	if (memblock_debug)
+#endif
 		__memblock_dump_all();
 }
 

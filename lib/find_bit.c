@@ -76,6 +76,58 @@ unsigned long find_next_bit(const unsigned long *addr, unsigned long size,
 EXPORT_SYMBOL(find_next_bit);
 #endif
 
+#ifdef CONFIG_MP_MMA_ENABLE
+#define BITOP_WORD(nr)		((nr) / BITS_PER_LONG)
+#ifndef find_next_bit_from_high_to_low
+/*
+ * Find the next set bit in a memory region.
+ */
+unsigned long find_next_bit_from_high_to_low(const unsigned long *addr, unsigned long size,
+			    unsigned long offset)
+{
+	const unsigned long *p = addr + BITOP_WORD(size-1);
+	unsigned long result = (size-1) & ~(BITS_PER_LONG-1);
+	unsigned long tmp;
+
+	if (offset >= size)
+		return size;
+
+	size -= (offset & ~(BITS_PER_LONG-1));
+
+	while (size & ~(BITS_PER_LONG-1)) {
+		if ((tmp = *(p--)))
+			goto found_middle;
+		result -= BITS_PER_LONG;
+		size -= BITS_PER_LONG;
+	}
+	if (!size)
+		return result;
+
+	offset %= BITS_PER_LONG;
+	if (offset) {
+		tmp = *(p--);
+		tmp &= (~0UL << offset);
+		if (size < BITS_PER_LONG)
+			goto found_first;
+		if (tmp)
+			goto found_middle;
+		size -= BITS_PER_LONG;
+		result -= BITS_PER_LONG;
+	}
+
+	tmp = *p;
+
+found_first:
+	tmp &= (~0UL >> (BITS_PER_LONG - size));
+	if (tmp == 0UL)		/* Are any bits set? */
+		return result + size;	/* Nope. */
+found_middle:
+	return result + fls(tmp);
+}
+EXPORT_SYMBOL(find_next_bit_from_high_to_low);
+#endif
+#endif
+
 #ifndef find_next_zero_bit
 unsigned long find_next_zero_bit(const unsigned long *addr, unsigned long size,
 				 unsigned long offset)
@@ -93,6 +145,59 @@ unsigned long find_next_and_bit(const unsigned long *addr1,
 	return _find_next_bit(addr1, addr2, size, offset, 0UL);
 }
 EXPORT_SYMBOL(find_next_and_bit);
+#endif
+
+#ifdef CONFIG_MP_MMA_ENABLE
+#ifndef find_next_zero_bit_from_high_to_low
+/*
+ * This implementation of find_{first,next}_zero_bit was stolen from
+ * Linus' asm-alpha/bitops.h.
+ */
+unsigned long find_next_zero_bit_from_high_to_low(const unsigned long *addr, unsigned long size,
+				 unsigned long offset)
+{
+	const unsigned long *p = addr + BITOP_WORD(size-1);
+	unsigned long result = (size-1) & ~(BITS_PER_LONG-1);
+	unsigned long tmp;
+
+	if (offset >= size)
+		return size;
+	size -= (offset & ~(BITS_PER_LONG-1));
+
+	while (size & ~(BITS_PER_LONG-1)) {
+		if (~(tmp = *(p--)))
+			goto found_middle;
+		result -= BITS_PER_LONG;
+		size -= BITS_PER_LONG;
+	}
+	if (!size)
+		return result;
+
+	offset %= BITS_PER_LONG;
+	if (offset) {
+		tmp = *(p--);
+		tmp |= ~0UL >> (BITS_PER_LONG - offset);
+		if (~tmp)
+			goto found_middle;
+		if (size < BITS_PER_LONG)
+			goto found_first;
+
+		size -= BITS_PER_LONG;
+		result -= BITS_PER_LONG;
+	}
+
+
+	tmp = *p;
+
+found_first:
+	tmp |= ~0UL << size;
+	if (tmp == ~0UL)	/* Are any bits zero? */
+		return result + size;	/* Nope. */
+found_middle:
+	return result + fls(~tmp);
+}
+EXPORT_SYMBOL(find_next_zero_bit_from_high_to_low);
+#endif
 #endif
 
 #ifndef find_first_bit

@@ -2708,6 +2708,14 @@ int clear_page_dirty_for_io(struct page *page)
 }
 EXPORT_SYMBOL(clear_page_dirty_for_io);
 
+#if (MP_NTFS3G_WRAP==1)
+int test_clear_page_writeback_wrap(struct page *page)
+{
+	return test_clear_page_writeback(page);
+}
+EXPORT_SYMBOL(test_clear_page_writeback_wrap);
+#endif
+
 int test_clear_page_writeback(struct page *page)
 {
 	struct address_space *mapping = page_mapping(page);

@@ -62,13 +62,22 @@ static void lzo_exit(struct crypto_tfm *tfm)
 	lzo_free_ctx(NULL, ctx->lzo_comp_mem);
 }
 
+#ifdef CONFIG_MP_ZSM
+static int __lzo_compress(const u8 *src, unsigned int slen,
+			  u8 *dst, unsigned int *dlen, void *ctx, u32 *crc32)
+#else
 static int __lzo_compress(const u8 *src, unsigned int slen,
 			  u8 *dst, unsigned int *dlen, void *ctx)
+#endif
 {
 	size_t tmp_len = *dlen; /* size_t(ulong) <-> uint on 64 bit */
 	int err;
 
+#ifdef CONFIG_MP_ZSM
+	err = lzo1x_1_compress_crc(src, slen, dst, &tmp_len, ctx, crc32);
+#else
 	err = lzo1x_1_compress(src, slen, dst, &tmp_len, ctx);
+#endif
 
 	if (err != LZO_E_OK)
 		return -EINVAL;
@@ -81,15 +90,28 @@ static int lzo_compress(struct crypto_tfm *tfm, const u8 *src,
 			unsigned int slen, u8 *dst, unsigned int *dlen)
 {
 	struct lzo_ctx *ctx = crypto_tfm_ctx(tfm);
-
+#ifdef CONFIG_MP_ZSM
+	int ret;
+	u32 crc32;
+	ret = __lzo_compress(src, slen, dst, dlen, ctx->lzo_comp_mem, &crc32);
+	tfm->crc32 = crc32;
+	return ret;
+#else
 	return __lzo_compress(src, slen, dst, dlen, ctx->lzo_comp_mem);
+#endif
 }
+
 
 static int lzo_scompress(struct crypto_scomp *tfm, const u8 *src,
 			 unsigned int slen, u8 *dst, unsigned int *dlen,
 			 void *ctx)
 {
+#ifdef CONFIG_MP_ZSM
+	u32 crc32; /* unused here */
+	return __lzo_compress(src, slen, dst, dlen, ctx, &crc32);
+#else
 	return __lzo_compress(src, slen, dst, dlen, ctx);
+#endif
 }
 
 static int __lzo_decompress(const u8 *src, unsigned int slen,

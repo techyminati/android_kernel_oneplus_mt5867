@@ -219,38 +219,17 @@ static DECLARE_WORK(reg_work, reg_todo);
 
 /* We keep a static world regulatory domain in case of the absence of CRDA */
 static const struct ieee80211_regdomain world_regdom = {
-	.n_reg_rules = 8,
+	.n_reg_rules = 4,
 	.alpha2 =  "00",
 	.reg_rules = {
-		/* IEEE 802.11b/g, channels 1..11 */
-		REG_RULE(2412-10, 2462+10, 40, 6, 20, 0),
-		/* IEEE 802.11b/g, channels 12..13. */
-		REG_RULE(2467-10, 2472+10, 20, 6, 20,
-			NL80211_RRF_NO_IR | NL80211_RRF_AUTO_BW),
-		/* IEEE 802.11 channel 14 - Only JP enables
-		 * this and for 802.11b only */
-		REG_RULE(2484-10, 2484+10, 20, 6, 20,
-			NL80211_RRF_NO_IR |
-			NL80211_RRF_NO_OFDM),
+		/* IEEE 802.11b/g, channels 1..13 */
+		REG_RULE(2412-10, 2472+10, 40, 6, 20, 0),
+
 		/* IEEE 802.11a, channel 36..48 */
-		REG_RULE(5180-10, 5240+10, 80, 6, 20,
-                        NL80211_RRF_NO_IR |
-                        NL80211_RRF_AUTO_BW),
-
-		/* IEEE 802.11a, channel 52..64 - DFS required */
-		REG_RULE(5260-10, 5320+10, 80, 6, 20,
-			NL80211_RRF_NO_IR |
-			NL80211_RRF_AUTO_BW |
-			NL80211_RRF_DFS),
-
-		/* IEEE 802.11a, channel 100..144 - DFS required */
-		REG_RULE(5500-10, 5720+10, 160, 6, 20,
-			NL80211_RRF_NO_IR |
-			NL80211_RRF_DFS),
+		REG_RULE(5180-10, 5240+10, 80, 6, 20, NL80211_RRF_AUTO_BW),
 
 		/* IEEE 802.11a, channel 149..165 */
-		REG_RULE(5745-10, 5825+10, 80, 6, 20,
-			NL80211_RRF_NO_IR),
+		REG_RULE(5745-10, 5825+10, 80, 6, 20, 0),
 
 		/* IEEE 802.11ad (60GHz), channels 1..3 */
 		REG_RULE(56160+2160*1-1080, 56160+2160*3+1080, 2160, 0, 0, 0),

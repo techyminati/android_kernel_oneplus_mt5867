@@ -41,6 +41,10 @@
 #include <asm/byteorder.h>
 #include <uapi/linux/fs.h>
 
+// Mstar mali build code modify
+// If not include the <mstar/mpatch_macro.h> will cause mali build error.
+#include <mstar/mpatch_macro.h>
+
 struct backing_dev_info;
 struct bdi_writeback;
 struct bio;
@@ -901,6 +905,9 @@ struct file {
 		struct rcu_head 	fu_rcuhead;
 	} f_u;
 	struct path		f_path;
+#if defined(MP_DEBUG_TOOL_OPROFILE) && (MP_DEBUG_TOOL_OPROFILE == 1)
+#define f_dentry	f_path.dentry
+#endif /*MP_DEBUG_TOOL_OPROFILE*/
 	struct inode		*f_inode;	/* cached value */
 	const struct file_operations	*f_op;
 
@@ -1866,6 +1873,7 @@ ssize_t rw_copy_check_uvector(int type, const struct iovec __user * uvector,
 
 extern ssize_t __vfs_read(struct file *, char __user *, size_t, loff_t *);
 extern ssize_t vfs_read(struct file *, char __user *, size_t, loff_t *);
+extern ssize_t vfs_read1(struct file *, char __user *, size_t, loff_t *);
 extern ssize_t vfs_write(struct file *, const char __user *, size_t, loff_t *);
 extern ssize_t vfs_readv(struct file *, const struct iovec __user *,
 		unsigned long, loff_t *, rwf_t);
@@ -2502,6 +2510,10 @@ extern long do_sys_open(int dfd, const char __user *filename, int flags,
 			umode_t mode);
 extern struct file *file_open_name(struct filename *, int, umode_t);
 extern struct file *filp_open(const char *, int, umode_t);
+#ifdef  CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL
+extern int file_ioctl(struct file *filp, unsigned int cmd,
+         	unsigned long arg);
+#endif
 extern struct file *file_open_root(struct dentry *, struct vfsmount *,
 				   const char *, int, umode_t);
 extern struct file * dentry_open(const struct path *, int, const struct cred *);
@@ -2997,6 +3009,9 @@ extern unsigned int get_next_ino(void);
 extern void evict_inodes(struct super_block *sb);
 
 extern void __iget(struct inode * inode);
+#if (MP_NTFS3G_WRAP==1)
+extern void __iget_wrap(struct inode * inode);      //AlanYu 20111121 : wrap for __iget()
+#endif
 extern void iget_failed(struct inode *);
 extern void clear_inode(struct inode *);
 extern void __destroy_inode(struct inode *);
@@ -3291,8 +3306,15 @@ extern void generic_set_encrypted_ci_d_ops(struct inode *dir,
 extern int buffer_migrate_page(struct address_space *,
 				struct page *, struct page *,
 				enum migrate_mode);
+#ifdef CONFIG_MP_CMA_PATCH_MIGRATION_FILTER
+extern int ext4_jnl_migrate_page(struct address_space *mapping,
+	struct page *newpage, struct page *page, enum migrate_mode mode);
+#endif
 #else
 #define buffer_migrate_page NULL
+#ifdef CONFIG_MP_CMA_PATCH_MIGRATION_FILTER
+#define ext4_jnl_migrate_page NULL
+#endif
 #endif
 
 extern int setattr_prepare(struct dentry *, struct iattr *);

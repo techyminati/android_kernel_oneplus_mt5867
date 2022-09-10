@@ -16,7 +16,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  *
- * Author: Artem Bityutskiy (Битюцкий Артём)
+ * Author: Artem Bityutskiy (?и???кий ????м)
  */
 
 /*
@@ -182,6 +182,20 @@ retry:
 			ubi_assert(len == read);
 			return UBI_IO_BITFLIPS;
 		}
+		#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+		else if(err ==( -EUCLEAN - 1))
+		{
+			ubi_msg(ubi, "fixable bit-flip detected at PEB %d", pnum);
+			ubi_assert(len == read);
+			return UBI_IO_BITFLIPS_BAD;
+		}
+		else if(err ==( -EUCLEAN - 2))
+		{
+			ubi_msg(ubi,"fixable bit-flip detected at PEB %d", pnum);
+			ubi_assert(len == read);
+			return UBI_IO_BITFLIPS_TORTURE;
+		}
+		#endif
 
 		if (retries++ < UBI_IO_RETRIES) {
 			ubi_warn(ubi, "error %d%s while reading %d bytes from PEB %d:%d, read only %zd bytes, retry",
@@ -426,7 +440,11 @@ static int torture_peb(struct ubi_device *ubi, int pnum)
 
 out:
 	mutex_unlock(&ubi->buf_mutex);
+#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	if (err != UBI_IO_BITFLIPS) {
+#else
 	if (err == UBI_IO_BITFLIPS || mtd_is_eccerr(err)) {
+#endif
 		/*
 		 * If a bit-flip or data integrity error was detected, the test
 		 * has not passed because it happened on a freshly erased
@@ -554,11 +572,29 @@ int ubi_io_sync_erase(struct ubi_device *ubi, int pnum, int torture)
 			return err;
 	}
 
+	//disable torture peb to meet nand spec requirement
+	//As eba is written fail, it would be put back to wl sub-system with
+	//set of torture flag. In order to meet spec requirement,
+	//do not reuse the written fail block. Mark it bad.
+	#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	if (torture == 1) {
+		//ret = torture_peb(ubi, pnum);
+		ret = -EIO;
+		if (ret < 0)
+			return ret;
+	}
+	else if (torture == 2) {
+		ret = torture_peb(ubi, pnum);
+		if (ret < 0)
+			return ret;
+	}
+	#else
 	if (torture) {
 		ret = torture_peb(ubi, pnum);
 		if (ret < 0)
 			return ret;
 	}
+	#endif
 
 	err = do_sync_erase(ubi, pnum);
 	if (err)
@@ -708,7 +744,11 @@ int ubi_io_read_ec_hdr(struct ubi_device *ubi, int pnum,
 
 	read_err = ubi_io_read(ubi, ec_hdr, pnum, 0, UBI_EC_HDR_SIZE);
 	if (read_err) {
+		#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+		if (read_err != UBI_IO_BITFLIPS && read_err != UBI_IO_BITFLIPS_BAD && read_err != UBI_IO_BITFLIPS_TORTURE && read_err != -EBADMSG)
+		#else
 		if (read_err != UBI_IO_BITFLIPS && !mtd_is_eccerr(read_err))
+		#endif
 			return read_err;
 
 		/*
@@ -880,8 +920,15 @@ static int validate_vid_hdr(const struct ubi_device *ubi,
 	if (vol_id >= UBI_INTERNAL_VOL_START && compat != UBI_COMPAT_DELETE &&
 	    compat != UBI_COMPAT_RO && compat != UBI_COMPAT_PRESERVE &&
 	    compat != UBI_COMPAT_REJECT) {
+		#if defined(CONFIG_MTD_UBI_BACKUP_LSB) && (MP_NAND_UBI == 1)
+			if (vol_id != UBI_BACKUP_VOLUME_ID) {
+			ubi_err(ubi, "bad compat");
+			goto bad;
+		}
+		#else
 		ubi_err(ubi, "bad compat");
 		goto bad;
+		#endif
 	}
 
 	if (vol_type != UBI_VID_DYNAMIC && vol_type != UBI_VID_STATIC) {
@@ -987,8 +1034,13 @@ int ubi_io_read_vid_hdr(struct ubi_device *ubi, int pnum,
 
 	read_err = ubi_io_read(ubi, p, pnum, ubi->vid_hdr_aloffset,
 			  ubi->vid_hdr_shift + UBI_VID_HDR_SIZE);
+	#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	if (read_err && read_err != UBI_IO_BITFLIPS && read_err != UBI_IO_BITFLIPS_BAD && read_err!= UBI_IO_BITFLIPS_TORTURE && read_err != -EBADMSG)
+		return read_err;
+	#else
 	if (read_err && read_err != UBI_IO_BITFLIPS && !mtd_is_eccerr(read_err))
 		return read_err;
+	#endif
 
 	magic = be32_to_cpu(vid_hdr->magic);
 	if (magic != UBI_VID_HDR_MAGIC) {
@@ -1175,7 +1227,11 @@ static int self_check_peb_ec_hdr(const struct ubi_device *ubi, int pnum)
 		return -ENOMEM;
 
 	err = ubi_io_read(ubi, ec_hdr, pnum, 0, UBI_EC_HDR_SIZE);
+	#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	if (err && err != UBI_IO_BITFLIPS && err != UBI_IO_BITFLIPS_BAD && err != UBI_IO_BITFLIPS_TORTURE && err != -EBADMSG)
+	#else
 	if (err && err != UBI_IO_BITFLIPS && !mtd_is_eccerr(err))
+	#endif
 		goto exit;
 
 	crc = crc32(UBI_CRC32_INIT, ec_hdr, UBI_EC_HDR_SIZE_CRC);
@@ -1265,7 +1321,11 @@ static int self_check_peb_vid_hdr(const struct ubi_device *ubi, int pnum)
 	p = vidb->buffer;
 	err = ubi_io_read(ubi, p, pnum, ubi->vid_hdr_aloffset,
 			  ubi->vid_hdr_alsize);
+	#if defined(CONFIG_MTD_UBI_BITFLIPS) && (MP_NAND_UBI == 1)
+	if (err && err != UBI_IO_BITFLIPS && err != UBI_IO_BITFLIPS_BAD && err != UBI_IO_BITFLIPS_TORTURE && err != -EBADMSG)
+	#else
 	if (err && err != UBI_IO_BITFLIPS && !mtd_is_eccerr(err))
+	#endif
 		goto exit;
 
 	crc = crc32(UBI_CRC32_INIT, vid_hdr, UBI_VID_HDR_SIZE_CRC);
@@ -1407,3 +1467,87 @@ error:
 	vfree(buf);
 	return err;
 }
+#if defined(CONFIG_MTD_UBI_BACKUP_LSB) && (MP_NAND_UBI == 1)
+/* Read one page with oob one time */
+int ubi_io_read_oob(const struct ubi_device *ubi, void *databuf, void *oobbuf,
+		int pnum, int offset)
+{
+	int err;
+	loff_t addr;
+	struct mtd_oob_ops ops;
+
+	dbg_io("read from PEB %d:%d", pnum, offset);
+
+	ubi_assert(pnum >= 0 && pnum < ubi->peb_count);
+	ubi_assert(offset >= 0 && offset + ubi->min_io_size <= ubi->peb_size);
+
+	addr = (loff_t)pnum * ubi->peb_size + offset;
+
+	ops.mode = MTD_OPS_AUTO_OOB;
+	ops.ooblen = ubi->mtd->oobavail;
+	ops.oobbuf = oobbuf;
+	ops.ooboffs = 0;
+	ops.len = ubi->min_io_size;
+	ops.datbuf = databuf;
+	ops.retlen = ops.oobretlen = 0;
+
+	err = ubi->mtd->_read_oob(ubi->mtd, addr, &ops);
+	if (err) {
+		if (err == -EUCLEAN) {
+			/*
+			 * -EUCLEAN is reported if there was a bit-flip which
+			 * was corrected, so this is harmless.
+			 *
+			 * We do not report about it here unless debugging is
+			 * enabled. A corresponding message will be printed
+			 * later, when it is has been scrubbed.
+			 */
+			ubi_msg(ubi, "fixable bit-flip detected at PEB %d", pnum);
+			if(oobbuf)
+				ubi_assert(ops.oobretlen == ops.ooblen);
+			return UBI_IO_BITFLIPS;
+		}
+		if (ops.retlen != ops.len && err == -EBADMSG) {
+			ubi_err(ubi, "err(%d), retlen(%zu), len(%zu)", err, ops.retlen, ops.len);
+			err = -EIO;
+		}
+	}
+
+	return err;
+}
+
+/* Write one page with oob one time */
+int ubi_io_write_oob(const struct ubi_device *ubi, void *databuf, void *oobbuf,
+		int pnum, int offset)
+{
+	int err;
+	loff_t addr;
+	struct mtd_oob_ops ops;
+
+	dbg_io("read from PEB %d:%d", pnum, offset);
+
+	ubi_assert(pnum >= 0 && pnum < ubi->peb_count);
+	ubi_assert(offset >= 0 && offset + ubi->min_io_size <= ubi->peb_size);
+
+	addr = (loff_t)pnum * ubi->peb_size + offset;
+
+	ops.mode = MTD_OPS_AUTO_OOB;
+	ops.ooblen = ubi->mtd->oobavail;
+	ops.oobbuf = oobbuf;
+	ops.ooboffs = 0;
+	ops.len = ubi->min_io_size;
+	ops.datbuf = databuf;
+	ops.retlen = ops.oobretlen = 0;
+
+	err = ubi->mtd->_write_oob(ubi->mtd, addr, &ops);
+	if (err) {
+		ubi_err(ubi, "error %d while writing to PEB %d:%d, written ",
+			err, pnum, offset);
+		//ubi_dbg_dump_stack();
+	} else
+		ubi_assert(ops.retlen == ops.len);
+
+	return err;
+}
+#endif
+

@@ -220,4 +220,13 @@ source "drivers/siox/Kconfig"
 source "drivers/slimbus/Kconfig"
 
 source "drivers/energy_model/Kconfig"
+
+source "drivers/gator/Kconfig"
+
+source "drivers/smaf/Kconfig"
+
+source "drivers/switch/Kconfig"
+
+source "drivers/mstar2/Kconfig"
+
 endmenu

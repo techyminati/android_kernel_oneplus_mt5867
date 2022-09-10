@@ -2148,10 +2148,19 @@ static int snd_pcm_hw_rule_sample_bits(struct snd_pcm_hw_params *params,
 #error "Change this table"
 #endif
 
+#if defined(CONFIG_PLAT_MSTAR)
+/*MStar patch - support 12000 and 24000*/
+static const unsigned int rates[] = {
+	5512, 8000, 11025, 16000, 22050, 32000, 44100,
+	48000, 64000, 88200, 96000, 176400, 192000, 352800, 384000,
+	12000, 24000
+};
+#else
 static const unsigned int rates[] = {
 	5512, 8000, 11025, 16000, 22050, 32000, 44100,
 	48000, 64000, 88200, 96000, 176400, 192000, 352800, 384000
 };
+#endif
 
 const struct snd_pcm_hw_constraint_list snd_pcm_known_rates = {
 	.count = ARRAY_SIZE(rates),

@@ -1649,6 +1649,120 @@ static const struct seq_operations zoneinfo_op = {
 	.show	= zoneinfo_show,
 };
 
+#if defined(CONFIG_MP_ASYM_UMA_ALLOCATION)
+static int allocmonitor_show(struct seq_file *m, void *v)
+{
+	int idx = 0;
+	seq_printf(m, "allocmonitor_process: total=%d\n", atomic_read(&total_monitor_process));
+	for(idx = 0; idx < atomic_read(&total_monitor_process); idx++) {
+		seq_printf(m, "%s ", process_alloc_monitor[idx].name_process);
+	}
+	seq_printf(m, "\n");
+	return 0;
+}
+
+static int allocmonitor_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, allocmonitor_show, NULL);
+}
+
+static ssize_t allocmonitor_write(struct file *file, const char __user *buffer, size_t count, loff_t *f_pos)
+{
+	char *tmp = kzalloc((count+1), GFP_KERNEL);
+	int idx;
+	if (!tmp)
+		return -ENOMEM;
+
+	if (copy_from_user(tmp,buffer,count)) {
+		kfree(tmp);
+		return -EFAULT;
+	}
+
+	for (idx = 0; idx < MAX_MONITOR_PROCESS; idx++)
+		process_alloc_monitor[idx].name_process[0] = '\0';
+
+	sscanf(tmp, "%16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s ",
+		process_alloc_monitor[ 0].name_process, process_alloc_monitor[ 1].name_process,
+		process_alloc_monitor[ 2].name_process, process_alloc_monitor[ 3].name_process,
+		process_alloc_monitor[ 4].name_process, process_alloc_monitor[ 5].name_process,
+		process_alloc_monitor[ 6].name_process, process_alloc_monitor[ 7].name_process,
+		process_alloc_monitor[ 8].name_process, process_alloc_monitor[ 9].name_process,
+		process_alloc_monitor[10].name_process, process_alloc_monitor[11].name_process,
+		process_alloc_monitor[12].name_process, process_alloc_monitor[13].name_process,
+		process_alloc_monitor[14].name_process, process_alloc_monitor[15].name_process,
+		process_alloc_monitor[16].name_process, process_alloc_monitor[17].name_process,
+		process_alloc_monitor[18].name_process, process_alloc_monitor[19].name_process);
+
+	atomic_set(&total_monitor_process, 0);
+	for (idx = 0; idx < MAX_MONITOR_PROCESS; idx++) {
+		if (process_alloc_monitor[idx].name_process[0] != '\0')
+			atomic_inc(&total_monitor_process);
+	}
+	return count;
+}
+
+
+
+static const struct file_operations proc_allocmonitor_file_operations  = {
+	.open           = allocmonitor_open,
+	.read           = seq_read,
+	.llseek         = seq_lseek,
+	.release        = seq_release,
+	.write          = allocmonitor_write,
+};
+
+
+static int allocshow_show(struct seq_file *m, void *v)
+{
+	int idx = 0;
+	seq_printf(m, "      ProcessName  PID   StartFrom   page_cnt_sym   page_cnt_asym\n");
+	seq_printf(m, "=================================================================\n");
+	for(idx = 0; idx < atomic_read(&total_monitor_process); idx++) {
+		seq_printf(m, "%16s  %5d %10s %10d %10d\n", process_alloc_monitor[idx].name_process
+		                                          , process_alloc_monitor[idx].pid_process
+		                                          , process_alloc_monitor[idx].start_from_zone
+		                                          , atomic_read(&process_alloc_monitor[idx].alloc_cnt_sym)
+		                                          , atomic_read(&process_alloc_monitor[idx].alloc_cnt_asym));
+	}
+	return 0;
+}
+
+static int allocshow_open(struct inode *inode, struct file *file)
+{
+    return single_open(file, allocshow_show, NULL);
+}
+
+static ssize_t allocshow_write(struct file *file, const char __user *buffer, size_t count, loff_t *f_pos)
+{
+	char *tmp = kzalloc((count+1), GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+
+	if (copy_from_user(tmp,buffer,count)) {
+		kfree(tmp);
+		return -EFAULT;
+	}
+
+	if (!strncmp(tmp, "clear", strlen("clear"))) {
+		int idx;
+		for (idx = 0; idx < atomic_read(&total_monitor_process); idx++) {
+			atomic_set(&process_alloc_monitor[idx].alloc_cnt_sym, 0);
+			atomic_set(&process_alloc_monitor[idx].alloc_cnt_asym, 0);
+		}
+	}
+
+	return count;
+}
+
+static const struct file_operations proc_allocshow_file_operations  = {
+        .open           = allocshow_open,
+        .read           = seq_read,
+        .llseek         = seq_lseek,
+        .release        = seq_release,
+        .write          = allocshow_write,
+};
+#endif
+
 enum writeback_stat_item {
 	NR_DIRTY_THRESHOLD,
 	NR_DIRTY_BG_THRESHOLD,
@@ -1981,6 +2095,10 @@ void __init init_mm_internals(void)
 	proc_create_seq("pagetypeinfo", 0400, NULL, &pagetypeinfo_op);
 	proc_create_seq("vmstat", 0444, NULL, &vmstat_op);
 	proc_create_seq("zoneinfo", 0444, NULL, &zoneinfo_op);
+#if defined(CONFIG_MP_ASYM_UMA_ALLOCATION)
+	proc_create("allocmonitor", 0444, NULL, &proc_allocmonitor_file_operations);
+	proc_create("allocshow", 0444, NULL, &proc_allocshow_file_operations);
+#endif
 #endif
 }
 

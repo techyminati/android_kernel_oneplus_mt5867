@@ -33,6 +33,11 @@
 #include "cache-tauros3.h"
 #include "cache-aurora-l2.h"
 
+#if (MP_PLATFORM_ARM == 1)
+#include <chip_setup.h>
+#endif/*MP_PLATFORM_ARM*/
+
+
 struct l2c_init_data {
 	const char *type;
 	unsigned way_size_0;
@@ -185,6 +190,9 @@ static void l2c_resume(void)
 static void __l2c210_cache_sync(void __iomem *base)
 {
 	writel_relaxed(0, base + sync_reg_offset);
+#if (MP_PLATFORM_ARM == 1)
+	_chip_flush_miu_pipe();
+#endif
 }
 
 static void __l2c210_op_pa_range(void __iomem *reg, unsigned long start,
@@ -236,11 +244,18 @@ static void l2c210_flush_range(unsigned long start, unsigned long end)
 static void l2c210_flush_all(void)
 {
 	void __iomem *base = l2x0_base;
+#ifdef MP_PLATFORM_ARM
+	unsigned long flags;
 
+	raw_spin_lock_irqsave(&l2x0_lock, flags);
+#endif
 	BUG_ON(!irqs_disabled());
 
 	__l2c_op_way(base + L2X0_CLEAN_INV_WAY);
 	__l2c210_cache_sync(base);
+#ifdef MP_PLATFORM_ARM
+	raw_spin_unlock_irqrestore(&l2x0_lock, flags);
+#endif
 }
 
 static void l2c210_sync(void)
@@ -690,6 +705,14 @@ static void __init l2c310_enable(void __iomem *base, unsigned num_lock)
 				  l2c310_dying_cpu);
 }
 
+#if (MP_PLATFORM_ARM == 1)
+static inline int l2x0_is_enable(void)
+{
+	return (readl_relaxed(l2x0_base + L2X0_CTRL) & 1);
+}
+#endif/*MP_PLATFORM_ARM*/
+
+
 static void __init l2c310_fixup(void __iomem *base, u32 cache_id,
 	struct outer_cache_fns *fns)
 {
@@ -769,6 +792,60 @@ static void l2c310_unlock(void __iomem *base, unsigned num_lock)
 		l2c_unlock(base, num_lock);
 }
 
+#if (MP_PLATFORM_ARM == 1)
+static inline void cache_wait_way(void __iomem *reg, unsigned long mask)
+{
+	/* wait for cache operation by line or way to complete */
+	while (readl_relaxed(reg) & mask)
+		cpu_relax();
+}
+
+#ifdef CONFIG_CACHE_PL310
+static inline void cache_wait(void __iomem *reg, unsigned long mask)
+{
+	/* cache operations by line are atomic on PL310 */
+}
+#else
+#define cache_wait      cache_wait_way
+#endif
+
+static inline void cache_sync(void)
+{
+	void __iomem *base = l2x0_base;
+
+	writel_relaxed(0, base + sync_reg_offset);
+	cache_wait(base + L2X0_CACHE_SYNC, 1);
+}
+
+static void l2x0_clean_all(void)
+{
+	unsigned long flags;
+
+	/* clean all ways */
+	raw_spin_lock_irqsave(&l2x0_lock, flags);
+	writel_relaxed(l2x0_way_mask, l2x0_base + L2X0_CLEAN_WAY);
+	cache_wait_way(l2x0_base + L2X0_CLEAN_WAY, l2x0_way_mask);
+	cache_sync();
+	raw_spin_unlock_irqrestore(&l2x0_lock, flags);
+#if (MP_PLATFORM_ARM == 1)
+	_chip_flush_miu_pipe();
+#endif/*MP_PLATFORM_ARM*/
+}
+
+static void l2x0_inv_all(void)
+{
+ 	unsigned long flags;
+
+	/* invalidate all ways */
+	raw_spin_lock_irqsave(&l2x0_lock, flags);
+	/* Invalidating when L2 is enabled is a nono */
+	BUG_ON(readl(l2x0_base + L2X0_CTRL) & L2X0_CTRL_EN);
+	writel_relaxed(l2x0_way_mask, l2x0_base + L2X0_INV_WAY);
+	cache_wait_way(l2x0_base + L2X0_INV_WAY, l2x0_way_mask);
+	cache_sync();
+	raw_spin_unlock_irqrestore(&l2x0_lock, flags);
+}
+#endif
 static const struct l2c_init_data l2c310_init_fns __initconst = {
 	.type = "L2C-310",
 	.way_size_0 = SZ_8K,
@@ -786,6 +863,11 @@ static const struct l2c_init_data l2c310_init_fns __initconst = {
 		.disable = l2c310_disable,
 		.sync = l2c210_sync,
 		.resume = l2c310_resume,
+#if (MP_PLATFORM_ARM == 1)
+		.is_enable = l2x0_is_enable,
+		.clean_all = l2x0_clean_all,
+		.inv_all = l2x0_inv_all,
+#endif
 	},
 };
 

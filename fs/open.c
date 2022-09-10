@@ -1106,6 +1106,9 @@ long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)
 	putname(tmp);
 	return fd;
 }
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+EXPORT_SYMBOL(do_sys_open);
+#endif
 
 SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 {
@@ -1114,6 +1117,12 @@ SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 
 	return do_sys_open(AT_FDCWD, filename, flags, mode);
 }
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+#ifdef CONFIG_ARM64
+#define sys_open __arm64_sys_open
+#endif
+EXPORT_SYMBOL(sys_open);
+#endif
 
 SYSCALL_DEFINE4(openat, int, dfd, const char __user *, filename, int, flags,
 		umode_t, mode)
@@ -1201,6 +1210,12 @@ SYSCALL_DEFINE1(close, unsigned int, fd)
 
 	return retval;
 }
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+#ifdef CONFIG_ARM64
+#define sys_close __arm64_sys_close
+#endif
+EXPORT_SYMBOL(sys_close);
+#endif
 
 /*
  * This routine simulates a hangup on the tty, to arrange that users

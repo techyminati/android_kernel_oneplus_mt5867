@@ -19,6 +19,15 @@
 struct clock_event_device;
 struct module;
 
+/* Clock event mode commands */
+enum clock_event_mode {
+	CLOCK_EVT_MODE_UNUSED = 0,
+	CLOCK_EVT_MODE_SHUTDOWN,
+	CLOCK_EVT_MODE_PERIODIC,
+	CLOCK_EVT_MODE_ONESHOT,
+	CLOCK_EVT_MODE_RESUME,
+};
+
 /*
  * Possible states of a clock event device.
  *

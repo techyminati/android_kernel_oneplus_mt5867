@@ -1,4 +1,19 @@
 # SPDX-License-Identifier: GPL-2.0
+
+#compatibulity with mstar
+EXTRA_CFLAGS += -Idrivers/mstar/usb
+
+#compatibility with mstar2
+ifeq ($(CONFIG_ONEHAL_ARCH_SUPPORT),y)
+ONEHAL_VERSION = $(subst \",,$(CONFIG_ONEHAL_VERSION))
+ONEHAL_DIR = ver_$(ONEHAL_VERSION)
+EXTRA_CFLAGS += -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/usb/$(ONEHAL_DIR)
+endif
+EXTRA_CFLAGS += -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/usb
+EXTRA_CFLAGS += -Idrivers/mstar2/include
+EXTRA_CFLAGS += -Idrivers/mstar2/drv/gpio
+EXTRA_CFLAGS += -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/gpio
+
 #
 # Makefile for physical layer USB drivers
 #
@@ -20,6 +35,7 @@ obj-$(CONFIG_USB_TEGRA_PHY)		+= phy-tegra-usb.o
 obj-$(CONFIG_USB_GPIO_VBUS)		+= phy-gpio-vbus-usb.o
 obj-$(CONFIG_USB_ISP1301)		+= phy-isp1301.o
 obj-$(CONFIG_USB_MV_OTG)		+= phy-mv-usb.o
+obj-$(CONFIG_USB_MS_OTG)		+= phy-ms-usb.o
 obj-$(CONFIG_USB_MXS_PHY)		+= phy-mxs-usb.o
 obj-$(CONFIG_USB_ULPI)			+= phy-ulpi.o
 obj-$(CONFIG_USB_ULPI_VIEWPORT)		+= phy-ulpi-viewport.o

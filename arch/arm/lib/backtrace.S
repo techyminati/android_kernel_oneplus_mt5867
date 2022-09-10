@@ -68,6 +68,13 @@ for_each_frame:	tst	frame, mask		@ Check for address exceptions
 		sub	sv_pc, sv_pc, offset	@ Correct PC for prefetching
 		bic	sv_pc, sv_pc, mask	@ mask PC/LR for the mode
 
+#ifdef CONFIG_MSTAR_CHIP
+		mov	r0, sv_pc
+		bl	kernel_text_address	@ check if sv_pc is valid
+		cmp	r0, #0			@ if sv_pc is not kernel text
+		beq	1006f			@ address, abort backtrace
+#endif
+
 1003:		ldr	r2, [sv_pc, #-4]	@ if stmfd sp!, {args} exists,
 		ldr	r3, .Ldsi+4		@ adjust saved 'pc' back one
 		teq	r3, r2, lsr #10		@ instruction

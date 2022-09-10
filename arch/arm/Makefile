@@ -10,7 +10,8 @@
 #
 # Copyright (C) 1995-2001 by Russell King
 
-LDFLAGS_vmlinux	:=-p --no-undefined -X --pic-veneer
+#LDFLAGS_vmlinux	:=-p --no-undefined -X --pic-veneer
+LDFLAGS_vmlinux	:=--no-undefined -X --pic-veneer
 ifeq ($(CONFIG_CPU_ENDIAN_BE8),y)
 LDFLAGS_vmlinux	+= --be8
 KBUILD_LDFLAGS_MODULE	+= --be8
@@ -106,7 +107,11 @@ tune-$(CONFIG_CPU_V6K)		=$(call cc-option,-mtune=arm1136j-s,-mtune=strongarm)
 tune-y := $(tune-y)
 
 ifeq ($(CONFIG_AEABI),y)
+ifeq ($(CONFIG_MSTAR_M3822),y)
+CFLAGS_ABI	:=-mabi=aapcs-linux -mno-thumb-interwork -mfpu=vfpv3-d16
+else
 CFLAGS_ABI	:=-mabi=aapcs-linux -mfpu=vfp
+endif
 else
 CFLAGS_ABI	:=$(call cc-option,-mapcs-32,-mabi=apcs-gnu) $(call cc-option,-mno-thumb-interwork,)
 endif
@@ -233,6 +238,30 @@ machine-$(CONFIG_ARCH_W90X900)		+= w90x900
 machine-$(CONFIG_ARCH_ZX)		+= zx
 machine-$(CONFIG_ARCH_ZYNQ)		+= zynq
 machine-$(CONFIG_PLAT_SPEAR)		+= spear
+# mediatek-dtv chips
+machine-$(CONFIG_MSTAR_M7322)		+= m7322
+machine-$(CONFIG_MSTAR_M7332)           += m7332
+machine-$(CONFIG_MSTAR_M5621)		+= m5621
+machine-$(CONFIG_MSTAR_M7621)		+= m7621
+machine-$(CONFIG_MSTAR_M7622)		+= m7622
+machine-$(CONFIG_MSTAR_M7632)           += m7632
+machine-$(CONFIG_MSTAR_M7642)           += m7642
+machine-$(CONFIG_MSTAR_M7221)		+= m7221
+machine-$(CONFIG_MSTAR_MASERATI)	+= maserati
+machine-$(CONFIG_MSTAR_M3822)		+= m3822
+machine-$(CONFIG_MSTAR_MT5862)           += mt5862
+machine-$(CONFIG_MSTAR_MT5867)          += mt5867
+machine-$(CONFIG_MSTAR_MT5889)		+= mt5889
+machine-$(CONFIG_MSTAR_MT5872)		+= mt5872
+
+KBUILD_CPPFLAGS += -Idrivers/mstar2
+ifeq ($(CONFIG_ONEHAL_ARCH_SUPPORT),y)
+ONEHAL_VERSION= $(subst ",,$(CONFIG_ONEHAL_VERSION))
+ONEHAL_DIR = ver_$(ONEHAL_VERSION)
+KBUILD_CPPFLAGS	+=  -Idrivers/mstar2/hal/$(subst ",,$(CONFIG_MSTAR_CHIP_NAME))/cpu/arm/$(ONEHAL_DIR)
+KBUILD_CPPFLAGS	+=  -Idrivers/mstar2/hal/$(subst ",,$(CONFIG_MSTAR_CHIP_NAME))/miu/$(ONEHAL_DIR)
+KBUILD_CPPFLAGS +=  -Idrivers/mstar2/hal/$(subst ",,$(CONFIG_MSTAR_CHIP_NAME))/gpio/$(ONEHAL_DIR)
+endif
 
 # Platform directory name.  This list is sorted alphanumerically
 # by CONFIG_* macro name.
@@ -245,6 +274,8 @@ plat-$(CONFIG_PLAT_ORION)	+= orion
 plat-$(CONFIG_PLAT_PXA)		+= pxa
 plat-$(CONFIG_PLAT_S3C24XX)	+= samsung
 plat-$(CONFIG_PLAT_VERSATILE)	+= versatile
+plat-$(CONFIG_PLAT_MSTAR)       += mstar
+
 
 ifeq ($(CONFIG_ARCH_EBSA110),y)
 # This is what happens if you forget the IOCS16 line.
@@ -273,9 +304,21 @@ ifneq ($(CONFIG_ARCH_MULTIPLATFORM),y)
 ifneq ($(CONFIG_ARM_SINGLE_ARMV7M),y)
 ifeq ($(KBUILD_SRC),)
 KBUILD_CPPFLAGS += $(patsubst %,-I%include,$(machdirs) $(platdirs))
+ifneq ($(CONFIG_MSTAR_CHIP),)
+KBUILD_CPPFLAGS += $(patsubst %,-I%,$(machdirs) $(platdirs))
+endif
 else
 KBUILD_CPPFLAGS += $(patsubst %,-I$(srctree)/%include,$(machdirs) $(platdirs))
+ifneq ($(CONFIG_MSTAR_CHIP),)
+KBUILD_CPPFLAGS += $(patsubst %,-I$(srctree)/%,$(machdirs) $(platdirs))
 endif
+endif
+endif
+endif
+
+ifeq ($(CONFIG_MP_MSTAR_STR_BASE),y)
+ifneq ($(wildcard $(MACHINE)/mstar_strmisc_chip.h),)
+KBUILD_CPPFLAGS += -DMSTAR_STRMISC_CHIP
 endif
 endif
 
@@ -331,7 +374,11 @@ archprepare:
 # Convert bzImage to zImage
 bzImage: zImage
 
+ifeq ($(CONFIG_MSTAR_ARM),y)
+BOOT_TARGETS	= zImage Image xipImage bootpImage uImage uImage-dtb
+else
 BOOT_TARGETS	= zImage Image xipImage bootpImage uImage
+endif
 INSTALL_TARGETS	= zinstall uinstall install
 
 PHONY += bzImage $(BOOT_TARGETS) $(INSTALL_TARGETS)
@@ -346,7 +393,11 @@ $(BOOT_TARGETS): vmlinux
 $(INSTALL_TARGETS):
 	$(Q)$(MAKE) $(build)=$(boot) MACHINE=$(MACHINE) $@
 
+ifeq ($(CONFIG_MSTAR_ARM),y)
+%.dtb %.dtbo %.main_dtb: | scripts
+else
 %.dtb: | scripts
+endif
 	$(Q)$(MAKE) $(build)=$(boot)/dts MACHINE=$(MACHINE) $(boot)/dts/$@
 
 PHONY += dtbs dtbs_install

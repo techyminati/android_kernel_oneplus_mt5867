@@ -15,3 +15,7 @@ obj-$(CONFIG_GENERIC_IRQ_IPI) += ipi.o
 obj-$(CONFIG_SMP) += affinity.o
 obj-$(CONFIG_GENERIC_IRQ_DEBUGFS) += debugfs.o
 obj-$(CONFIG_GENERIC_IRQ_MATRIX_ALLOCATOR) += matrix.o
+
+#if defined(CONFIG_MP_PLATFORM_ARCH_GENERAL)
+EXTRA_CFLAGS      +=  -Ifs/proc
+#endif

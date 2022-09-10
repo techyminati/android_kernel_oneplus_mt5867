@@ -15,10 +15,17 @@ struct task_struct;
 #include <asm/pgtable.h>
 
 extern unsigned char kasan_early_shadow_page[PAGE_SIZE];
+#ifdef CONFIG_ARM
+extern pte_t kasan_early_shadow_pte[PTRS_PER_PTE * 2];
+#else
 extern pte_t kasan_early_shadow_pte[PTRS_PER_PTE];
+#endif
 extern pmd_t kasan_early_shadow_pmd[PTRS_PER_PMD];
 extern pud_t kasan_early_shadow_pud[PTRS_PER_PUD];
 extern p4d_t kasan_early_shadow_p4d[MAX_PTRS_PER_P4D];
+#ifdef CONFIG_ARM
+extern bool kasan_initialized;
+#endif
 
 int kasan_populate_early_shadow(const void *shadow_start,
 				const void *shadow_end);

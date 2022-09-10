@@ -138,6 +138,10 @@ static int ten_thousand = 10000;
 static int six_hundred_forty_kb = 640 * 1024;
 #endif
 
+#ifdef CONFIG_MP_ION_PATCH_MSTAR
+extern int mali_alloc_strategy;
+#endif
+
 /* this is needed for the proc_doulongvec_minmax of vm_dirty_bytes */
 static unsigned long dirty_bytes_min = 2 * PAGE_SIZE;
 
@@ -1277,6 +1281,36 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 #endif
+#if defined(CONFIG_MP_AUDIO_DECODE_PERFORMANCE)
+	{
+		.procname       = "enable_audio_decoding",
+		.data           = &sysctl_enable_audio_decoding,
+		.maxlen         = sizeof(unsigned int),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+	},
+	{
+		.procname       = "audio_process_name",
+		.data           = &sysctl_audio_process_name,
+		.maxlen         = TASK_COMM_LEN*sizeof(char),
+		.mode           = 0644,
+		.proc_handler   = proc_dostring,
+	},
+	{
+		.procname       = "enable_audio_decode_scheduler",
+		.data           = &sysctl_enable_audio_decode_scheduler,
+		.maxlen         = sizeof(unsigned int),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+	},
+	{
+		.procname       = "bind_android_bg",
+		.data           = &sysctl_bind_android_bg,
+		.maxlen         = sizeof(unsigned int),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+	},
+#endif
 	{ }
 };
 
@@ -1714,6 +1748,15 @@ static struct ctl_table vm_table[] = {
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= (void *)&mmap_rnd_compat_bits_min,
 		.extra2		= (void *)&mmap_rnd_compat_bits_max,
+	},
+#endif
+#ifdef CONFIG_MP_ION_PATCH_MSTAR
+	{
+		.procname   = "mali_alloc_strategy",
+		.data       = &mali_alloc_strategy,
+		.maxlen     = sizeof(int),
+		.mode       = 0666,
+		.proc_handler   = proc_dointvec,
 	},
 #endif
 	{ }

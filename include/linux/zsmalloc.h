@@ -15,7 +15,6 @@
 #define _ZS_MALLOC_H_
 
 #include <linux/types.h>
-
 /*
  * zsmalloc mapping modes
  *
@@ -33,6 +32,7 @@ enum zs_mapmode {
 	 * existing data.
 	 */
 };
+
 
 struct zs_pool_stats {
 	/* How many pages were migrated (freed) */
@@ -52,6 +52,7 @@ size_t zs_huge_class_size(struct zs_pool *pool);
 void *zs_map_object(struct zs_pool *pool, unsigned long handle,
 			enum zs_mapmode mm);
 void zs_unmap_object(struct zs_pool *pool, unsigned long handle);
+
 
 unsigned long zs_get_total_pages(struct zs_pool *pool);
 unsigned long zs_compact(struct zs_pool *pool);

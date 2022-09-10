@@ -145,6 +145,11 @@
  
 #define SIOCDEVPRIVATE	0x89F0	/* to 89FF */
 
+#ifdef CONFIG_MP_GEMAC_IOC_DEV_PRIVATE
+#define SIOCDEVON	0x89F1	/* turn on PHY */
+#define SIOCDEVOFF	0x89F2	/* turn off PHY */
+#endif /* End of CONFIG_MP_GEMAC_IOC_DEV_PRIVATE */
+
 /*
  *	These 16 ioctl calls are protocol private
  */

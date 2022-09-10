@@ -260,7 +260,11 @@ int nf_ct_l4proto_register_one(const struct nf_conntrack_l4proto *l4proto)
 	}
 
 	rcu_assign_pointer(nf_ct_protos[l4proto->l3proto][l4proto->l4proto],
+#if defined(CONFIG_CC_IS_CLANG) && defined(CONFIG_MSTAR_CHIP)
+			   (struct nf_conntrack_l4proto *)l4proto);
+#else
 			   l4proto);
+#endif
 out_unlock:
 	mutex_unlock(&nf_ct_proto_mutex);
 	return ret;
@@ -303,7 +307,11 @@ static void __nf_ct_l4proto_unregister_one(const struct nf_conntrack_l4proto *l4
 			lockdep_is_held(&nf_ct_proto_mutex)
 			) != l4proto);
 	rcu_assign_pointer(nf_ct_protos[l4proto->l3proto][l4proto->l4proto],
+#if defined(CONFIG_CC_IS_CLANG) && defined(CONFIG_MSTAR_CHIP)
+			   (struct nf_conntrack_l4proto *)&nf_conntrack_l4proto_generic);
+#else
 			   &nf_conntrack_l4proto_generic);
+#endif
 }
 
 void nf_ct_l4proto_unregister_one(const struct nf_conntrack_l4proto *l4proto)

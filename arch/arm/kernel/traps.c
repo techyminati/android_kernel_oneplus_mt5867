@@ -65,6 +65,7 @@ __setup("user_debug=", user_debug_setup);
 
 static void dump_mem(const char *, const char *, unsigned long, unsigned long);
 
+static int dump_backtrace_short = 0;
 void dump_backtrace_entry(unsigned long where, unsigned long from, unsigned long frame)
 {
 #ifdef CONFIG_KALLSYMS
@@ -249,6 +250,66 @@ void show_stack(struct task_struct *tsk, unsigned long *sp)
 	barrier();
 }
 
+unsigned int dump_system_info_ctrl = 0xFF; // verbose by default
+static const char stat_nam[] = "RSDTtXZxKWPNn";
+static void dump_task(struct task_struct *tsk)
+{
+	int org_dump_backtrace_short = dump_backtrace_short;
+	int state;
+	struct cpu_context_save *context = &(task_thread_info(tsk)->cpu_context);
+	char buf[80];
+
+	state = tsk->state ? __ffs(tsk->state) + 1 : 0;
+	buf[0] = 0;
+	if (tsk->policy != SCHED_NORMAL)
+		snprintf(buf, sizeof(buf), "\tsch %d %d", tsk->policy, tsk->rt_priority);
+	printk("Task %d %s\tPPid %d\tSta %c%s\n", tsk->pid, tsk->comm,
+		tsk->real_parent->pid, state < sizeof(stat_nam) - 1 ? stat_nam[state] : '?',
+		buf);
+	printk("pc %08x sp %08x fp %08x\n",
+		context->pc, context->sp,
+		context->fp);
+	printk("sl %08x r9 %08x r8 %08x\n",
+		context->sl, context->r9,
+		context->r8);
+	printk("r7 %08x r6 %08x r5 %08x r4 %08x\n",
+		context->r7, context->r6,
+		context->r5, context->r4);
+	if (dump_system_info_ctrl & 0x2)
+	{
+		dump_backtrace_short = 0;
+	}
+	else
+	{
+		dump_backtrace_short = 1;
+	}
+	dump_backtrace(NULL, tsk);
+	dump_backtrace_short = org_dump_backtrace_short;
+}
+
+// used in watchdog ISR
+void dump_system_info(void)
+{
+	struct task_struct *pTask, *pTmp;
+
+	console_verbose();
+	do_each_thread(pTask, pTmp)
+	{
+		if (dump_system_info_ctrl & 0x1)
+		{
+			dump_task(pTmp);
+		}
+		else
+		{
+			if (pTmp->state == TASK_RUNNING)
+			{
+				dump_task(pTmp);
+			}
+		}
+	} while_each_thread(pTask, pTmp);
+}
+EXPORT_SYMBOL(dump_system_info);
+
 #ifdef CONFIG_PREEMPT
 #define S_PREEMPT " PREEMPT"
 #else
@@ -286,7 +347,11 @@ static int __die(const char *str, int err, struct pt_regs *regs)
 
 	if (!user_mode(regs) || in_interrupt()) {
 		dump_mem(KERN_EMERG, "Stack: ", regs->ARM_sp,
+#ifdef CONFIG_MP_IRQ_STACK
+			 THREAD_SIZE + (unsigned long)(regs->ARM_sp & ~(THREAD_SIZE - 1)));
+#else
 			 THREAD_SIZE + (unsigned long)task_stack_page(tsk));
+#endif
 		dump_backtrace(regs, tsk);
 		dump_instr(KERN_EMERG, regs);
 	}

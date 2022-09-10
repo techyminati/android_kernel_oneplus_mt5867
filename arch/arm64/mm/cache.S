@@ -306,6 +306,20 @@ ENTRY(__dma_flush_area)
 ENDPIPROC(__dma_flush_area)
 
 /*
+ *	dmac_flush_range(start, end)
+ *
+ *	clean & invalidate D / U line
+ *
+ *	- start   - virtual start address of region
+ *	- end    - virtual end address of region
+ */
+ENTRY(dmac_flush_range)
+	sub x1, x1, x0
+	dcache_by_line_op civac, sy, x0, x1, x2, x3
+	ret
+ENDPIPROC(dmac_flush_range)
+
+/*
  *	__dma_map_area(start, size, dir)
  *	- start	- kernel virtual start address
  *	- size	- size of region

@@ -26,8 +26,15 @@ static void tee_shm_release(struct tee_shm *shm)
 
 	mutex_lock(&teedev->mutex);
 	idr_remove(&teedev->idr, shm->id);
+#ifdef CONFIG_MSTAR_CHIP
+	if (shm->ctx) {
+		if (!(shm->flags & TEE_SHM_PREALLOC))
+			list_del(&shm->link);
+	}
+#else
 	if (shm->ctx)
 		list_del(&shm->link);
+#endif
 	mutex_unlock(&teedev->mutex);
 
 	if (shm->flags & TEE_SHM_POOL) {
@@ -53,8 +60,15 @@ static void tee_shm_release(struct tee_shm *shm)
 		kfree(shm->pages);
 	}
 
-	if (shm->ctx)
-		teedev_ctx_put(shm->ctx);
+#ifdef CONFIG_MSTAR_CHIP
+	if (shm->ctx) {
+		if (!(shm->flags & TEE_SHM_PREALLOC))
+			teedev_ctx_put(shm->ctx);
+	}
+#else
+        if (shm->ctx)
+                teedev_ctx_put(shm->ctx);
+#endif
 
 	kfree(shm);
 
@@ -126,7 +140,11 @@ static struct tee_shm *__tee_shm_alloc(struct tee_context *ctx,
 		return ERR_PTR(-EINVAL);
 	}
 
+#ifdef CONFIG_MSTAR_CHIP
+	if ((flags & ~(TEE_SHM_MAPPED | TEE_SHM_DMA_BUF | TEE_SHM_PREALLOC))) {
+#else
 	if ((flags & ~(TEE_SHM_MAPPED | TEE_SHM_DMA_BUF))) {
+#endif
 		dev_err(teedev->dev.parent, "invalid shm flags 0x%x", flags);
 		return ERR_PTR(-EINVAL);
 	}
@@ -184,12 +202,13 @@ static struct tee_shm *__tee_shm_alloc(struct tee_context *ctx,
 	}
 
 	if (ctx) {
-		teedev_ctx_get(ctx);
-		mutex_lock(&teedev->mutex);
-		list_add_tail(&shm->link, &ctx->list_shm);
-		mutex_unlock(&teedev->mutex);
+		if (!(shm->flags & TEE_SHM_PREALLOC)) {
+			teedev_ctx_get(ctx);
+			mutex_lock(&teedev->mutex);
+			list_add_tail(&shm->link, &ctx->list_shm);
+			mutex_unlock(&teedev->mutex);
+		}
 	}
-
 	return shm;
 err_rem:
 	mutex_lock(&teedev->mutex);
@@ -216,12 +235,13 @@ err_dev_put:
  * set. If TEE_SHM_DMA_BUF global shared memory will be allocated and
  * associated with a dma-buf handle, else driver private memory.
  */
+#ifdef CONFIG_TEE_2_4
 struct tee_shm *tee_shm_alloc(struct tee_context *ctx, size_t size, u32 flags)
 {
 	return __tee_shm_alloc(ctx, ctx->teedev, size, flags);
 }
 EXPORT_SYMBOL_GPL(tee_shm_alloc);
-
+#endif
 struct tee_shm *tee_shm_priv_alloc(struct tee_device *teedev, size_t size)
 {
 	return __tee_shm_alloc(NULL, teedev, size, TEE_SHM_MAPPED);
@@ -366,8 +386,14 @@ int tee_shm_get_fd(struct tee_shm *shm)
  * tee_shm_free() - Free shared memory
  * @shm:	Handle to shared memory to free
  */
+#ifdef CONFIG_TEE_2_4
 void tee_shm_free(struct tee_shm *shm)
 {
+	if (unlikely(shm == NULL)) {
+		pr_crit("%s %s(%u) *shm == NULL\n",
+			__func__, current->comm, current->pid);
+		return;
+	}
 	/*
 	 * dma_buf_put() decreases the dmabuf reference counter and will
 	 * call tee_shm_release() when the last reference is gone.
@@ -381,7 +407,7 @@ void tee_shm_free(struct tee_shm *shm)
 		tee_shm_release(shm);
 }
 EXPORT_SYMBOL_GPL(tee_shm_free);
-
+#endif
 /**
  * tee_shm_va2pa() - Get physical address of a virtual address
  * @shm:	Shared memory handle
@@ -391,6 +417,11 @@ EXPORT_SYMBOL_GPL(tee_shm_free);
  */
 int tee_shm_va2pa(struct tee_shm *shm, void *va, phys_addr_t *pa)
 {
+	if (unlikely(shm == NULL)) {
+		pr_crit("%s %s(%u) *shm == NULL\n",
+			__func__, current->comm, current->pid);
+		return -EINVAL;
+	}
 	if (!(shm->flags & TEE_SHM_MAPPED))
 		return -EINVAL;
 	/* Check that we're in the range of the shm */
@@ -413,6 +444,11 @@ EXPORT_SYMBOL_GPL(tee_shm_va2pa);
  */
 int tee_shm_pa2va(struct tee_shm *shm, phys_addr_t pa, void **va)
 {
+	if (unlikely(shm == NULL)) {
+		pr_crit("%s %s(%u) *shm == NULL\n",
+			__func__, current->comm, current->pid);
+		return -EINVAL;
+	}
 	if (!(shm->flags & TEE_SHM_MAPPED))
 		return -EINVAL;
 	/* Check that we're in the range of the shm */
@@ -441,6 +477,11 @@ EXPORT_SYMBOL_GPL(tee_shm_pa2va);
  */
 void *tee_shm_get_va(struct tee_shm *shm, size_t offs)
 {
+	if (unlikely(shm == NULL)) {
+		pr_crit("%s %s(%u) *shm == NULL\n",
+			__func__, current->comm, current->pid);
+		return ERR_PTR(-EINVAL);
+	}
 	if (!(shm->flags & TEE_SHM_MAPPED))
 		return ERR_PTR(-EINVAL);
 	if (offs >= shm->size)
@@ -459,6 +500,11 @@ EXPORT_SYMBOL_GPL(tee_shm_get_va);
  */
 int tee_shm_get_pa(struct tee_shm *shm, size_t offs, phys_addr_t *pa)
 {
+	if (unlikely(shm == NULL)) {
+		pr_crit("%s %s(%u) *shm == NULL\n",
+			__func__, current->comm, current->pid);
+		return -EINVAL;
+	}
 	if (offs >= shm->size)
 		return -EINVAL;
 	if (pa)
@@ -498,9 +544,82 @@ EXPORT_SYMBOL_GPL(tee_shm_get_from_id);
  * tee_shm_put() - Decrease reference count on a shared memory handle
  * @shm:	Shared memory handle
  */
+#ifdef CONFIG_TEE_2_4
 void tee_shm_put(struct tee_shm *shm)
 {
+	if (unlikely(shm == NULL)) {
+		pr_crit("%s %s(%u) *shm == NULL\n",
+			__func__, current->comm, current->pid);
+	}
 	if (shm->flags & TEE_SHM_DMA_BUF)
 		dma_buf_put(shm->dmabuf);
 }
 EXPORT_SYMBOL_GPL(tee_shm_put);
+#endif
+#ifdef CONFIG_MSTAR_CHIP
+void tee_shm_free_tmp(struct tee_shm *shm, struct tee_device *teedev)
+{
+	struct tee_shm_pool_mgr *poolm = NULL;
+
+	poolm = teedev->pool->dma_buf_mgr;
+	poolm->ops->free(poolm, shm);
+	tee_device_put(teedev);
+}
+EXPORT_SYMBOL_GPL(tee_shm_free_tmp);
+
+int tee_shm_alloc_tmp(struct tee_shm **shm, int dataSize, struct tee_device *teedev)
+{
+	struct tee_shm_pool_mgr *poolm = NULL;
+	int ret;
+
+	*shm = kzalloc(sizeof(**shm), GFP_KERNEL);
+	if (!shm) {
+		pr_err("%s(%d): kzalloc failed!\n", __func__, __LINE__);
+		return -ENOMEM;
+	}
+
+	if (!tee_device_get(teedev)){
+		pr_err("%s(%d): tee_device_get failed!\n", __func__, __LINE__);
+		return -EINVAL;
+	}
+
+	if (!teedev->pool) {
+		pr_err("%s(%d): teedev has been detached from driver\n",
+				__func__, __LINE__);
+		return -EINVAL;
+	}
+
+	poolm = teedev->pool->dma_buf_mgr;
+
+	ret = poolm->ops->alloc(poolm, *shm, dataSize);
+	if (ret) {
+		pr_err("%s(%d): use alloc callback failed\n", __func__, __LINE__);
+		return ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(tee_shm_alloc_tmp);
+
+void* tee_shm_get_kaddr(struct tee_shm *shm)
+{
+	if (unlikely(shm == NULL)) {
+		pr_crit("%s %s(%u) *shm == NULL\n",
+			__func__, current->comm, current->pid);
+		return NULL;
+	}
+	return shm->kaddr;
+}
+EXPORT_SYMBOL_GPL(tee_shm_get_kaddr);
+
+phys_addr_t* tee_shm_get_paddr(struct tee_shm *shm)
+{
+	if (unlikely(shm == NULL)) {
+		pr_crit("%s %s(%u) *shm == NULL\n",
+			__func__, current->comm, current->pid);
+		return NULL;
+	}
+	return shm->paddr;
+}
+EXPORT_SYMBOL_GPL(tee_shm_get_paddr);
+#endif

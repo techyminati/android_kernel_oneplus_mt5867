@@ -448,6 +448,7 @@ void exit_files(struct task_struct *tsk)
 
 struct files_struct init_files = {
 	.count		= ATOMIC_INIT(1),
+	.resize_wait	= __WAIT_QUEUE_HEAD_INITIALIZER(init_files.resize_wait),
 	.fdt		= &init_files.fdtab,
 	.fdtab		= {
 		.max_fds	= NR_OPEN_DEFAULT,

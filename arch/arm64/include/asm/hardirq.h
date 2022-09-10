@@ -24,7 +24,11 @@
 #include <asm/kvm_arm.h>
 #include <asm/sysreg.h>
 
+#ifdef CONFIG_MP_DEBUG_TOOL_SYSRQ
+#define NR_IPI	8
+#else
 #define NR_IPI	7
+#endif
 
 typedef struct {
 	unsigned int __softirq_pending;
@@ -73,5 +77,10 @@ static inline void ack_bad_irq(unsigned int irq)
 	extern unsigned long irq_err_count;
 	irq_err_count++;
 }
+
+/*
+ * No arch-specific IRQ flags.
+ */
+#define set_irq_flags(irq, flags)
 
 #endif /* __ASM_HARDIRQ_H */

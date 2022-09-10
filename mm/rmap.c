@@ -72,6 +72,11 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+extern void show_page_trace(unsigned long pfn);
+extern void show_page_trace2(unsigned long pfn);
+#endif
+
 static struct kmem_cache *anon_vma_cachep;
 static struct kmem_cache *anon_vma_chain_cachep;
 
@@ -1897,23 +1902,108 @@ done:
 
 void rmap_walk(struct page *page, struct rmap_walk_control *rwc)
 {
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+	int ret;
+#endif
+
 	if (unlikely(PageKsm(page)))
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+	{
 		rmap_walk_ksm(page, rwc);
+
+		if (rwc->rmap_one == try_to_unmap_one) {
+			if (page_mapped(page) && is_cma_page(page)) {
+				pr_err("[MIG]m21\n");
+				show_page_trace(page_to_pfn(page));
+			}
+		}
+	}
+#else
+		rmap_walk_ksm(page, rwc);
+#endif
 	else if (PageAnon(page))
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+	{
 		rmap_walk_anon(page, rwc, false);
+
+		if (rwc->rmap_one == try_to_unmap_one) {
+			if (page_mapped(page) && is_cma_page(page)) {
+				pr_err("[MIG]m22 %d\n", ret);
+				// Joe~~~~~
+				pr_err("\033[35mpfn is 0x%lX, .rmap_one is %pF\033[m\n",
+					page_to_pfn(page), rwc->rmap_one);
+				show_page_trace(page_to_pfn(page));
+				pr_err("[MIG]m22 %d[DONE]\n", ret);
+			}
+		}
+	}
+#else
+		rmap_walk_anon(page, rwc, false);
+#endif
 	else
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+	{
 		rmap_walk_file(page, rwc, false);
+
+		if(rwc->rmap_one == try_to_unmap_one) {
+			if (page_mapped(page) && is_cma_page(page)) {
+				pr_err("[MIG]m23 %d\n", ret);
+				show_page_trace(page_to_pfn(page));
+			}
+		}
+	}
+#else
+		rmap_walk_file(page, rwc, false);
+#endif
 }
 
 /* Like rmap_walk, but caller holds relevant rmap lock */
 void rmap_walk_locked(struct page *page, struct rmap_walk_control *rwc)
 {
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+	int ret;
+#endif
+
 	/* no ksm support for now */
 	VM_BUG_ON_PAGE(PageKsm(page), page);
 	if (PageAnon(page))
-		rmap_walk_anon(page, rwc, true);
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+	{
+		ret = rmap_walk_anon(page, rwc, true);
+
+		if(rwc->rmap_one == try_to_unmap_one)
+		{
+			if(page_mapped(page) && is_cma_page(page)) {
+				printk(KERN_ERR "[MIG]m22 %d\n", ret);
+				printk("\033[35mnew_pfn is 0x%lX, .rmap_one is %pF\033[m\n", page_to_pfn(page), rwc->rmap_one); // joe.liu
+				show_page_trace(page_to_pfn(page));
+				printk(KERN_ERR "[MIG]m22 %d[DONE]\n", ret);
+			}
+		}
+
+		return ret;
+	}
+#else
+		return rmap_walk_anon(page, rwc, true);
+#endif
 	else
-		rmap_walk_file(page, rwc, true);
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+	{
+		ret = rmap_walk_file(page, rwc, true);
+
+		if(rwc->rmap_one == try_to_unmap_one)
+		{
+			if(page_mapped(page) && is_cma_page(page)) {
+				printk(KERN_ERR "[MIG]m23 %d\n", ret);
+				show_page_trace(page_to_pfn(page));
+			}
+		}
+
+		return ret;
+	}
+#else
+		return rmap_walk_file(page, rwc, true);
+#endif
 }
 
 #ifdef CONFIG_HUGETLB_PAGE

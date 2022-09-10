@@ -4,8 +4,8 @@
 #
 # Build U-Boot image when `mkimage' tool is available.
 #
-
 MKIMAGE=$(type -path "${CROSS_COMPILE}mkimage")
+MKIMAGE=arch/arm/boot/mkimage
 
 if [ -z "${MKIMAGE}" ]; then
 	MKIMAGE=$(type -path mkimage)

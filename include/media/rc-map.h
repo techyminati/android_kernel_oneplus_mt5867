@@ -66,6 +66,22 @@
 			 RC_PROTO_BIT_RC6_MCE | RC_PROTO_BIT_SHARP | \
 			 RC_PROTO_BIT_XMP | RC_PROTO_BIT_IMON)
 
+#define RC_TYPE_ALL (RC_TYPE_OTHER | RC_TYPE_RC5 | RC_TYPE_RC5X | \
+                     RC_TYPE_RC5_SZ | RC_TYPE_JVC | RC_TYPE_SONY12 | RC_TYPE_SONY15 | RC_TYPE_SONY20 | \
+                     RC_TYPE_NEC    | RC_TYPE_SANYO | RC_TYPE_MCE_KBD | RC_TYPE_RC6_0 | RC_TYPE_RC6_6A_20 | \
+                     RC_TYPE_RC6_6A_24 | RC_TYPE_RC6_6A_32 | RC_TYPE_RC6_MCE | \
+                     RC_TYPE_SHARP  | RC_TYPE_XMP )
+
+#define RC_BIT_ALL	(RC_BIT_UNKNOWN | RC_BIT_OTHER | \
+			 RC_BIT_RC5 | RC_BIT_RC5X | RC_BIT_RC5_SZ | \
+			 RC_BIT_JVC | \
+			 RC_BIT_SONY12 | RC_BIT_SONY15 | RC_BIT_SONY20 | \
+			 RC_BIT_NEC | RC_BIT_NECX | RC_BIT_NEC32 | \
+			 RC_BIT_SANYO | RC_BIT_MCE_KBD | RC_BIT_RC6_0 | \
+			 RC_BIT_RC6_6A_20 | RC_BIT_RC6_6A_24 | \
+			 RC_BIT_RC6_6A_32 | RC_BIT_RC6_MCE | RC_BIT_SHARP | \
+			 RC_BIT_XMP | RC_BIT_CEC)
+
 #define RC_PROTO_BIT_ALL_IR_ENCODER \
 			(RC_PROTO_BIT_RC5 | RC_PROTO_BIT_RC5X_20 | \
 			 RC_PROTO_BIT_RC5_SZ | RC_PROTO_BIT_JVC | \
@@ -278,6 +294,14 @@ struct rc_map *rc_map_get(const char *name);
 #define RC_MAP_WINFAST_USBII_DELUXE      "rc-winfast-usbii-deluxe"
 #define RC_MAP_SU3000                    "rc-su3000"
 #define RC_MAP_ZX_IRDEC                  "rc-zx-irdec"
+#define RC_MAP_MSTAR_TV                  "rc-mstar-tv"
+#define RC_MAP_CHANGHONG_TV              "rc-changhong-tv"
+#define RC_MAP_HAIER_TV                  "rc-haier-tv"
+#define RC_MAP_HISENSE_TV                "rc-hisense-tv"
+#define RC_MAP_KONKA_TV                  "rc-konka-tv"
+#define RC_MAP_SKYWORTH_TV               "rc-skyworth-tv"
+#define RC_MAP_TCL_TV                    "rc-tcl-tv"
+#define RC_MAP_RC6_6AMODE                "rc-rc6-6amode"
 
 /*
  * Please, do not just append newer Remote Controller names at the end.

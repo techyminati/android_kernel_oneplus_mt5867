@@ -1223,6 +1223,9 @@ void __weak arch_enable_nonboot_cpus_end(void)
 {
 }
 
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING) || defined(CONFIG_MP_PLATFORM_ARM_32bit_PORTING)
+extern void smp_clear_magic(void);
+#endif
 void enable_nonboot_cpus(void)
 {
 	int cpu, error;
@@ -1254,6 +1257,10 @@ void enable_nonboot_cpus(void)
 		}
 		pr_warn("Error taking CPU%d up: %d\n", cpu, error);
 	}
+
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING) || defined(CONFIG_MP_PLATFORM_ARM_32bit_PORTING)
+	smp_clear_magic();
+#endif
 
 	arch_enable_nonboot_cpus_end();
 

@@ -1607,6 +1607,14 @@ phys_addr_t __init_memblock memblock_start_of_DRAM(void)
 	return memblock.memory.regions[0].base;
 }
 
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
+/* lowest region size */
+phys_addr_t memblock_size_of_first_region(void)
+{
+	return memblock.memory.regions[0].size;
+}
+#endif
+
 phys_addr_t __init_memblock memblock_end_of_DRAM(void)
 {
 	int idx = memblock.memory.cnt - 1;

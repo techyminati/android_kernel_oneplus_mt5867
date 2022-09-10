@@ -108,7 +108,6 @@ u32 optee_supp_thrd_req(struct tee_context *ctx, u32 func, size_t num_params,
 
 	/* Tell an eventual waiter there's a new request */
 	complete(&supp->reqs_c);
-
 	/*
 	 * Wait for supplicant to process and return result, once we've
 	 * returned from wait_for_completion(&req->c) successfully we have
@@ -143,7 +142,6 @@ u32 optee_supp_thrd_req(struct tee_context *ctx, u32 func, size_t num_params,
 			break;
 		}
 	}
-
 	ret = req->ret;
 	kfree(req);
 

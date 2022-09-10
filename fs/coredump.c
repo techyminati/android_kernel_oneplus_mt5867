@@ -53,7 +53,14 @@
 
 int core_uses_pid;
 unsigned int core_pipe_limit;
+#ifdef CONFIG_MP_DEBUG_TOOL_COREDUMP
+char core_pattern[CORENAME_MAX_SIZE]="/mnt/vendor/tmp/Coredump.%p.%e";
+extern char * get_coredump_path(void);
+int compress_single = 0;
+EXPORT_SYMBOL(compress_single);
+#else
 char core_pattern[CORENAME_MAX_SIZE] = "core";
+#endif
 static int core_name_size = CORENAME_MAX_SIZE;
 
 struct core_name {
@@ -591,8 +598,41 @@ void do_coredump(const siginfo_t *siginfo)
 		goto fail_creds;
 
 	old_cred = override_creds(cred);
+#ifdef CONFIG_MP_DEBUG_TOOL_COREDUMP
+	if (*get_coredump_path() != 0)  /* bootargs */
+	{
+		printk("!!!!!!!!!!!!!!!!!!!!!! from bootargs CORE_DUMP_PATH is:%s\n",get_coredump_path());
+		//strcpy(core_pattern, get_coredump_path());
 
-	ispipe = format_corename(&cn, &cprm);
+		if(strstr(core_pattern,".gz") != NULL)
+		{
+			compress_single = 1;
+			printk(" you want a compress coredump file \n");
+		}
+		else
+		{
+			compress_single = 0;
+			printk(" you want a non-compress coredump file \n");
+		}
+
+		printk("!!!!!!!!!!!!!!!!!!!!!! from bootargs CORE_DUMP_PATH is:%s\n",core_pattern);
+	}
+	else
+	{
+		printk("!!!!!!!!!!!!!!!!!!!!!! bootargs don't add CORE_DUMP_PATH , default kernel coredump path is:%s\n",core_pattern);
+		if(strstr(core_pattern, ".gz") != NULL) {
+			compress_single = 1;
+			printk(" you want a compress coredump file \n");
+		}
+		else {
+			compress_single = 0;
+			printk(" you want a non-compress coredump file \n");
+		}
+
+	}
+#endif
+
+	ispipe = format_corename(&cn, &cprm);	// update core_pattern into cn
 
 	if (ispipe) {
 		int dump_count;
@@ -666,6 +706,17 @@ void do_coredump(const siginfo_t *siginfo)
 		if (cprm.limit < binfmt->min_coredump)
 			goto fail_unlock;
 
+#if (MP_DEBUG_TOOL_COREDUMP == 1)
+
+        if (!IS_ERR(cprm.file))
+        {
+            printk(KERN_ALERT "***** Create coredump file to %s ******\n", core_pattern);
+        }
+        else
+        {
+            printk(KERN_ALERT "***** Coredump Fail... can't create corefile to %s \n", core_pattern);
+        }
+#else /*original coredump*/
 		if (need_suid_safe && cn.corename[0] != '/') {
 			printk(KERN_WARNING "Pid %d(%s) can only dump core "\
 				"to fully qualified path!\n",
@@ -673,7 +724,7 @@ void do_coredump(const siginfo_t *siginfo)
 			printk(KERN_WARNING "Skipping core dump\n");
 			goto fail_unlock;
 		}
-
+#endif /*MP_DEBUG_TOOL_COREDUMP*/
 		/*
 		 * Unlink the file if it exists unless this is a SUID
 		 * binary - in that case, we're running around with root
@@ -752,11 +803,24 @@ void do_coredump(const siginfo_t *siginfo)
 		goto close_fail;
 	if (displaced)
 		put_files_struct(displaced);
+
+#if (MP_DEBUG_TOOL_COREDUMP == 1)
+        printk(KERN_ALERT "* Ultimate CoreDump v1.0 : started dumping core into 'Coredump.%d.gz' file *\n", current->pid);
+#else
+        printk(KERN_ALERT "* Original coredump : started dumping core into Coredump file *\n");
+#endif /*MP_DEBUG_TOOL_COREDUMP && CONFIG_BINFMT_ELF_COMP*/
+
 	if (!dump_interrupted()) {
 		file_start_write(cprm.file);
 		core_dumped = binfmt->core_dump(&cprm);
 		file_end_write(cprm.file);
 	}
+#if (MP_DEBUG_TOOL_COREDUMP == 1)
+
+	printk(KERN_ALERT "*****  the core is saved to '%s ******\n", core_pattern);
+	printk(KERN_ALERT "CoreDump: finished dumping core\n");
+#endif /*MP_DEBUG_TOOL_COREDUMP*/
+
 	if (ispipe && core_pipe_limit)
 		wait_for_dump_helpers(cprm.file);
 close_fail:

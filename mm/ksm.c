@@ -43,6 +43,10 @@
 #include <asm/tlbflush.h>
 #include "internal.h"
 
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+#include <linux/migrate.h>
+#endif
+
 #ifdef CONFIG_NUMA
 #define NUMA(x)		(x)
 #define DO_NUMA(x)	do { (x); } while (0)
@@ -1304,6 +1308,37 @@ out:
 	return err;
 }
 
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+static inline struct page *ksm_migrate_replace_cma_page(struct page *page)
+{
+	struct page *newpage = alloc_page(GFP_HIGHUSER);
+
+	if (!newpage)
+		goto out;
+
+	/*
+	 * Take additional reference to the new page to ensure it won't get
+	 * freed after migration procedure end.
+	 */
+	get_page(newpage);
+
+	if (migrate_replace_page(page, newpage) == 0) {
+		put_page(newpage);
+		return newpage;
+	}
+
+	put_page(newpage);
+	__free_page(newpage);
+
+out:
+	/*
+	 * Migration errors in case of get_user_pages() might not
+	 * be fatal to CMA itself, so better don't fail here.
+	 */
+	return page;
+}
+#endif
+
 /*
  * try_to_merge_two_pages - take two identical pages and prepare them
  * to be merged into one page.
@@ -1320,6 +1355,27 @@ static struct page *try_to_merge_two_pages(struct rmap_item *rmap_item,
 					   struct page *tree_page)
 {
 	int err;
+
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+	if (is_cma_page(page)) {
+		struct page *old_page = page;
+
+		put_page(page);
+		wait_on_page_locked_timeout(page);
+		page = ksm_migrate_replace_cma_page(page);
+		get_page(old_page);
+
+		if(page == old_page) {
+			if(page_mapcount(page) != 1) {
+				printk(KERN_ERR "SKIM stable tree may only trace one of the multiple references of this stable page candidate\n "
+								"      so we may failed KSM migration late. skip this page(%ld, mapcount%d)\n", page_to_pfn(page), page_mapcount(page));
+				return NULL;
+			}
+			else
+				printk(KERN_ERR "KSM migrate cma page failed, but page mapcount is equal to 1\n");
+		}
+	}
+#endif
 
 	err = try_to_merge_with_ksm_page(rmap_item, page, NULL);
 	if (!err) {
@@ -2116,6 +2172,16 @@ static void cmp_and_merge_page(struct page *page, struct rmap_item *rmap_item)
 		if (!err)
 			return;
 	}
+
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+	/* 
+	 * This patch is fix Mstar CMA & KSM conflict,
+	 * have to Fix later
+	 */
+	if (is_cma_page(page))
+		return;
+#endif
+
 	tree_rmap_item =
 		unstable_tree_search_insert(rmap_item, page, &tree_page);
 	if (tree_rmap_item) {

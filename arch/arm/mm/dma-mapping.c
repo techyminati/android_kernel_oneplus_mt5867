@@ -959,6 +959,17 @@ static void dma_cache_maint_page(struct page *page, unsigned long offset,
 
 		page = pfn_to_page(pfn);
 
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+		if(!pfn_valid(pfn))
+		{
+			// printk(KERN_EMERG "\033[35mFunction = %s, Line = %d, pfn is 0x%lX, page_to_pfn is 0x%lX, left is 0x%lX\033[m\n", __PRETTY_FUNCTION__, __LINE__, pfn, page_to_pfn(page), left);
+			offset = 0;
+			pfn++;
+			left -= len;
+			continue;
+		}
+#endif
+
 		if (PageHighMem(page)) {
 			if (len + offset > PAGE_SIZE)
 				len = PAGE_SIZE - offset;

@@ -35,6 +35,7 @@ static inline bool __virt_addr_valid(unsigned long x)
 	return false;
 }
 
+#if defined(CONFIG_PLAT_MSTAR)
 phys_addr_t __virt_to_phys(unsigned long x)
 {
 	WARN(!__virt_addr_valid(x),
@@ -44,6 +45,7 @@ phys_addr_t __virt_to_phys(unsigned long x)
 	return __virt_to_phys_nodebug(x);
 }
 EXPORT_SYMBOL(__virt_to_phys);
+#endif
 
 phys_addr_t __phys_addr_symbol(unsigned long x)
 {

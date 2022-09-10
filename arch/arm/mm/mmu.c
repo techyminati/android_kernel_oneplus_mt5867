@@ -958,7 +958,7 @@ static void __init __create_mapping(struct mm_struct *mm, struct map_desc *md,
  * offsets, and we take full advantage of sections and
  * supersections.
  */
-static void __init create_mapping(struct map_desc *md)
+void __init create_mapping(struct map_desc *md)
 {
 	if (md->virtual != vectors_base() && md->virtual < TASK_SIZE) {
 		pr_warn("BUG: not creating mapping for 0x%08llx at 0x%08lx in user region\n",
@@ -1173,7 +1173,11 @@ void __init adjust_lowmem_bounds(void)
 	 * and may itself be outside the valid range for which phys_addr_t
 	 * and therefore __pa() is defined.
 	 */
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+	vmalloc_limit = (u64)__pa(vmalloc_min - 1) + 1;
+#else
 	vmalloc_limit = (u64)(uintptr_t)vmalloc_min - PAGE_OFFSET + PHYS_OFFSET;
+#endif
 
 	/*
 	 * The first usable region must be PMD aligned. Mark its start
@@ -1270,8 +1274,16 @@ static inline void prepare_page_table(void)
 	/*
 	 * Clear out all the mappings below the kernel image.
 	 */
+#ifdef CONFIG_KASAN
+	for (addr = 0; addr < TASK_SIZE; addr += PMD_SIZE)
+		pmd_clear(pmd_off_k(addr));
+
+	/*TASK_SIZE ~ MODULES_VADDR is the KASAN's shadow area -- skip over it*/
+	addr = MODULES_VADDR;
+#else
 	for (addr = 0; addr < MODULES_VADDR; addr += PMD_SIZE)
 		pmd_clear(pmd_off_k(addr));
+#endif
 
 #ifdef CONFIG_XIP_KERNEL
 	/* The XIP kernel is mapped in the module area -- skip over it */

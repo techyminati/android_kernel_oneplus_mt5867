@@ -34,6 +34,26 @@
 
 #define OPTEE_SHM_NUM_PRIV_PAGES	CONFIG_OPTEE_SHM_NUM_PRIV_PAGES
 
+#ifdef CONFIG_MSTAR_CHIP
+#include <linux/freezer.h>
+#include <linux/delay.h>
+int optee_version = 0;
+EXPORT_SYMBOL(optee_version);
+#define TEE_SUP_NAME "tee-supplicant"
+
+atomic_t tee_sup_used = ATOMIC_INIT(0);
+
+atomic_t STR = ATOMIC_INIT(0);
+EXPORT_SYMBOL(STR);
+atomic_t SMC_UNLOCKED = ATOMIC_INIT(1);
+
+int _tee_get_supplicant_count(void)
+{
+	return (int)atomic_read(&tee_sup_used);
+}
+EXPORT_SYMBOL(_tee_get_supplicant_count);
+#endif
+
 /**
  * optee_from_msg_param() - convert from OPTEE_MSG parameters to
  *			    struct tee_param
@@ -254,6 +274,22 @@ static int optee_open(struct tee_context *ctx)
 
 	mutex_init(&ctxdata->mutex);
 	INIT_LIST_HEAD(&ctxdata->sess_list);
+#ifdef CONFIG_MSTAR_CHIP
+	/*
+	 * XXX: Add for tee-supplicant alive
+	*/
+	if (!strncmp(TEE_SUP_NAME, current->comm, strlen(TEE_SUP_NAME))) {
+		int cnt = atomic_read(&tee_sup_used);
+		if (cnt == 0) {
+			pr_info("tee-supplicant %s \n", __func__);
+			atomic_set(&tee_sup_used, 1);
+		} else {
+			pr_err("%s: [ERROR] should not go here, "
+				"only 1 tee-supplicant exist!\n", __func__);
+			atomic_set(&tee_sup_used, 1);
+		}
+	}
+#endif
 
 	ctx->data = ctxdata;
 	return 0;
@@ -307,6 +343,25 @@ static void optee_release(struct tee_context *ctx)
 
 	if (teedev == optee->supp_teedev)
 		optee_supp_release(&optee->supp);
+#ifdef CONFIG_MSTAR_CHIP
+	/*
+	 * XXX: Add for tee-supplicant alive
+	*/
+	if (!strncmp(TEE_SUP_NAME, current->comm, strlen(TEE_SUP_NAME))) {
+		int cnt = atomic_read(&tee_sup_used);
+		if (cnt == 1) {
+			pr_info("tee-supplicant %s \n", __func__);
+			atomic_set(&tee_sup_used, 0);
+		} else if (cnt == 0) {
+			pr_err("[ERROR] Should not go here, tee-supplicant "
+				"should already call %s!\n", __func__);
+		} else {
+			pr_err("%s: [ERROR] Should not go here, tee-supplicant "
+				"should be 0 or 1!\n", __func__);
+			atomic_set(&tee_sup_used, 0);
+		}
+	}
+#endif
 }
 
 static const struct tee_driver_ops optee_ops = {
@@ -369,7 +424,9 @@ static void optee_msg_get_os_revision(optee_invoke_fn *invoke_fn)
 
 	invoke_fn(OPTEE_SMC_CALL_GET_OS_REVISION, 0, 0, 0, 0, 0, 0, 0,
 		  &res.smccc);
-
+#ifdef CONFIG_MSTAR_CHIP
+	optee_version = res.result.major;
+#endif
 	if (res.result.build_id)
 		pr_info("revision %lu.%lu (%08lx)", res.result.major,
 			res.result.minor, res.result.build_id);
@@ -548,7 +605,221 @@ static optee_invoke_fn *get_invoke_func(struct device_node *np)
 	pr_warn("invalid \"method\" property: %s\n", method);
 	return ERR_PTR(-EINVAL);
 }
+#ifdef CONFIG_MSTAR_CHIP
+#include <linux/kthread.h>
+#include <linux/ctype.h>
+#include <linux/fs.h>
 
+#define tee_ramlog_write_rpoint(value)	\
+	(*(volatile unsigned int *)(tee_ramlog_buf_adr+4) = (value - tee_ramlog_buf_adr))
+#define tee_ramlog_read_wpoint	\
+	((*(volatile unsigned int *)(tee_ramlog_buf_adr)) + tee_ramlog_buf_adr)
+#define tee_ramlog_read_rpoint	\
+	((*(volatile unsigned int *)(tee_ramlog_buf_adr+4)) + tee_ramlog_buf_adr)
+#define MAX_PRINT_SIZE      256
+#define TEESMC32_ST_FASTCALL_RAMLOG 0xb200585C
+
+static DEFINE_MUTEX(tee_ramlog_lock);
+static struct task_struct *tee_ramlog_tsk = NULL;
+static unsigned long tee_ramlog_buf_adr = 0;
+static unsigned long tee_ramlog_buf_len = 0;
+static void *ramlog_vaddr = NULL;
+
+static inline bool valid_ramlog_ptr(unsigned long ptr)
+{
+	if (ptr < tee_ramlog_buf_adr ||
+		ptr > tee_ramlog_buf_adr + tee_ramlog_buf_len)
+		return false;
+
+	return true;
+}
+
+static int tee_ramlog_init_addr(unsigned long buf_adr,unsigned long buf_len)
+{
+	if ((buf_adr == 0) || (buf_len == 0)) {
+		pr_err("%s(%d): bad argument!\n", __func__, __LINE__);
+		return -EINVAL;
+	}
+
+	tee_ramlog_buf_adr = buf_adr;
+	tee_ramlog_buf_len = buf_len;
+	return 0;
+}
+
+static void tee_ramlog_dump(void)
+{
+	char log_buf[MAX_PRINT_SIZE];
+	char *log_buff_read_point = NULL;
+	char *tmp_point = NULL;
+	int log_count = 0;
+	unsigned long log_buff_write_point = tee_ramlog_read_wpoint;
+	log_buff_read_point = (char* )tee_ramlog_read_rpoint;
+
+	if (!valid_ramlog_ptr(log_buff_write_point) || !valid_ramlog_ptr((unsigned long)log_buff_read_point)) {
+		pr_err("tee ramlog: invalid read or write pointer\n");
+		return;
+	}
+
+	if ((unsigned long)log_buff_read_point == log_buff_write_point)
+		return;
+
+	mutex_lock(&tee_ramlog_lock);
+
+	while ((unsigned long)log_buff_read_point != log_buff_write_point) {
+		if (isascii(*(log_buff_read_point)) && *(log_buff_read_point) != '\0') {
+			if (log_count >= MAX_PRINT_SIZE) {
+				log_buf[log_count-2] = '\n';
+				log_buf[log_count-1] = '\0';
+				pr_info("%s", log_buf);
+				log_count = 0;
+			} else {
+				log_buf[log_count] = *(log_buff_read_point);
+				log_count++;
+				if (*(log_buff_read_point) == '\n') {
+					if (log_count >= MAX_PRINT_SIZE) {
+						log_buf[log_count-2] = '\n';
+						log_buf[log_count-1] = '\0';
+						pr_info("%s", log_buf);
+					} else {
+						log_buf[log_count] = '\0';
+						pr_info("%s", log_buf);
+					}
+					log_count = 0;
+				}
+			}
+		}
+
+		log_buff_read_point ++;
+		tmp_point = (char* )(tee_ramlog_buf_adr+tee_ramlog_buf_len);
+		if(log_buff_read_point == tmp_point) {
+			tmp_point = (char* )(tee_ramlog_buf_adr + 8);
+			log_buff_read_point = tmp_point;
+		}
+	}
+	tee_ramlog_write_rpoint((unsigned long)log_buff_read_point);
+
+	mutex_unlock(&tee_ramlog_lock);
+}
+
+static int tee_ramlog_loop(void *p)
+{
+	while(1) {
+		tee_ramlog_dump();
+		msleep(500);
+	}
+	return 0;
+}
+
+static int tee_ramlog_set_addr_len(unsigned long buf_adr,unsigned long buf_len)
+{
+	void* mapping_vaddr = NULL;
+
+	if ((buf_adr == 0) || (buf_len == 0))
+		return -EINVAL;
+
+	if (tee_ramlog_tsk) {
+		return 0;
+	}
+
+	//Check ramlog address and size were configured or not.
+	if ((tee_ramlog_buf_adr || tee_ramlog_buf_len) == 0) {
+		//Need to init ramlog_mutex
+		mutex_init(&tee_ramlog_lock);
+	}
+
+	mutex_lock(&tee_ramlog_lock);
+	mapping_vaddr = ioremap_cache(buf_adr, buf_len);
+	if (mapping_vaddr == NULL) {
+		mutex_unlock(&tee_ramlog_lock);
+		printk("\033[0;32;31m [OPTEE][RAMLOG] %s %d \033[m\n",__func__,__LINE__);
+		return -ENOMEM;
+	}
+
+	tee_ramlog_buf_adr = mapping_vaddr;
+	tee_ramlog_buf_len = buf_len;
+	mutex_unlock(&tee_ramlog_lock);
+
+	if(tee_ramlog_tsk == NULL)
+		tee_ramlog_tsk = kthread_run(tee_ramlog_loop, NULL, "tee_ramlog_loop");
+
+	return 0;
+}
+
+int optee_config_ramlog(optee_invoke_fn *invoke_fn, struct tee_device *teedev)
+{
+	struct tee_shm *shm = NULL;
+	struct tee_shm_pool_mgr *poolm = NULL;
+	int ret = 0;
+	int dataSize = 16;
+	struct file *pRamlogEnableFile = NULL;
+	mm_segment_t old_fs;
+	union {
+		struct arm_smccc_res smccc;
+		struct optee_smc_get_shm_config_result result;
+	} res;
+
+	ret = tee_shm_alloc_tmp(&shm, dataSize, teedev);
+	if (!shm) {
+		pr_err("%s(%d): tee_shm_alloc_tmp failed!\n", __func__, __LINE__);
+		return -ENOMEM;
+	}
+
+	pRamlogEnableFile = filp_open("/data/tee/ramlog_enable.bin", O_RDONLY, 0);
+	if (!IS_ERR(pRamlogEnableFile)) {
+		old_fs = get_fs();
+		set_fs(KERNEL_DS);
+		pRamlogEnableFile->f_op->read(pRamlogEnableFile,
+				tee_shm_get_kaddr(shm), dataSize,
+				&pRamlogEnableFile->f_pos);
+		set_fs(old_fs);
+		filp_close(pRamlogEnableFile, NULL);
+	}
+
+	invoke_fn(TEESMC32_ST_FASTCALL_RAMLOG, tee_shm_get_paddr(shm),
+				dataSize, 0, 0, 0, 0, 0, &res.smccc);
+	if (res.result.status != OPTEE_SMC_RETURN_OK) {
+		pr_info("%s(%d): ramlog service not available\n",
+			__func__, __LINE__);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	if (res.result.settings == OPTEE_SMC_SHM_CACHED)
+		ramlog_vaddr = ioremap_cache(res.result.start, res.result.size);
+	else
+		ramlog_vaddr = ioremap_nocache(res.result.start, res.result.size);
+
+	if (!ramlog_vaddr) {
+		pr_err("%s(%d): ioremap for ramlog VA failed!\n",
+			__func__, __LINE__);
+		ret = -ENOMEM;
+		goto exit;
+	}
+
+	pr_info("optee_smc_shm is %s\n",
+			res.result.settings == OPTEE_SMC_SHM_CACHED ?
+			"CACHED" : "NONCACHED");
+
+	ret = tee_ramlog_init_addr((unsigned long)ramlog_vaddr, res.result.size);
+	if (ret)
+		goto exit;
+
+	tee_ramlog_tsk = kthread_run(tee_ramlog_loop, NULL, "tee_ramlog_loop");
+	if (IS_ERR(tee_ramlog_tsk)) {
+		pr_err("%s(%d): create ramlog dump thread failed!\n",
+				__func__, __LINE__);
+		ret = -ENOMEM;
+		goto exit;
+	}
+
+	pr_info("[OPTEE][RAMLOG] VA %pK, PA %lX, size 0x%lx byte\n",
+			ramlog_vaddr, res.result.start, res.result.size);
+exit:
+	tee_shm_free_tmp(shm, teedev);
+	kfree(shm);
+	return ret;
+}
+#endif
 static struct optee *optee_probe(struct device_node *np)
 {
 	optee_invoke_fn *invoke_fn;
@@ -606,6 +877,13 @@ static struct optee *optee_probe(struct device_node *np)
 		goto err;
 	}
 	optee->teedev = teedev;
+
+#ifdef CONFIG_MSTAR_CHIP
+	rc = optee_config_ramlog(invoke_fn, teedev);
+	if (rc) {
+		pr_err("%s(%d): optee_config_ramlog failed!\n", __func__, __LINE__);
+	}
+#endif
 
 	teedev = tee_device_alloc(&optee_supp_desc, NULL, pool, optee);
 	if (IS_ERR(teedev)) {
@@ -675,6 +953,10 @@ static void optee_remove(struct optee *optee)
 	mutex_destroy(&optee->call_queue.mutex);
 
 	kfree(optee);
+#ifdef CONFIG_MSTAR_CHIP
+	if (ramlog_vaddr)
+		iounmap(ramlog_vaddr);
+#endif
 }
 
 static const struct of_device_id optee_match[] = {
@@ -684,11 +966,190 @@ static const struct of_device_id optee_match[] = {
 
 static struct optee *optee_svc;
 
+#ifdef CONFIG_MSTAR_CHIP
+#include <linux/proc_fs.h>
+#include <linux/suspend.h>
+
+
+static void notify_lock_smc(void *info)
+{
+	pr_info("%s(%d): Notify TEE CPU to Back for STR CPU %u\n",
+		__func__, __LINE__, smp_processor_id());
+	atomic_set(&SMC_UNLOCKED,0);
+}
+
+static void notify_unlock_smc(void)
+{
+	pr_info("%s(%d): Notify TEE CPU Lock SMC\n", __func__, __LINE__);
+	atomic_set(&SMC_UNLOCKED,1);
+	atomic_set(&STR, 0);
+}
+
+static int optee_driver_event(struct notifier_block *this,
+				unsigned long event, void *ptr)
+{
+	switch (event) {
+	case PM_HIBERNATION_PREPARE:
+		pr_info("%s(%d): PM_HIBERNATION_PREPARE\n", __func__, __LINE__);
+		break;
+	case PM_POST_HIBERNATION:
+		pr_info("%s(%d): PM_POST_HIBERNATION\n", __func__, __LINE__);
+		break;
+	case PM_SUSPEND_PREPARE:
+		pr_info("%s(%d): PM_SUSPEND_PREPARE\n", __func__, __LINE__);
+		atomic_set(&STR, 1);
+		smp_call_function(notify_lock_smc, NULL, 1);
+		break;
+	case PM_POST_SUSPEND:
+		pr_info("%s(%d): PM_POST_SUSPEND\n", __func__, __LINE__);
+		notify_unlock_smc();
+		add_timestamp("tee unlock");
+		break;
+	case PM_RESTORE_PREPARE:
+		pr_info("%s(%d): PM_RESTORE_PREPARE\n", __func__, __LINE__);
+		atomic_set(&STR, 1);
+		smp_call_function(notify_lock_smc, NULL, 1);
+		break;
+	case PM_POST_RESTORE :
+		pr_info("%s(%d): PM_POST_RESTORE\n", __func__, __LINE__);
+		notify_unlock_smc();
+		break;
+	default:
+		pr_info("%s(%d): unknow event 0x%lx\n", __func__, __LINE__, event);
+		break;
+	}
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block optee_pm_notifer = {
+	.notifier_call = optee_driver_event,
+	.priority = INT_MAX, // need to be first
+};
+
+static ssize_t tz_write(struct file *filp, const char __user *buffer,
+                                    size_t count, loff_t *ppos)
+{
+	char local_buf[128];
+	uint32_t loglevel;
+	struct tee *tee;
+	struct arm_smccc_res res;
+
+	if (count >= sizeof(local_buf))
+		return -EINVAL;
+
+	if (copy_from_user(local_buf, buffer, count))
+		return -EFAULT;
+
+	local_buf[count] = 0;
+
+	loglevel = simple_strtol(local_buf, NULL, 10);
+	pr_info("[OPTEE][LOGLEVEL] set log level to %d\n", loglevel);
+
+	// Mstar chip supported SMC method only!
+	optee_smccc_smc(0xb2005858, loglevel, 0, 0, 0, 0, 0, 0, &res);
+
+	return count;
+}
+
+static ssize_t tz_write_ramlog_addr(struct file *filp, const char __user *buffer,
+                                    size_t count, loff_t *ppos)
+{
+	char local_buf[256];
+	char* const delim = " ";
+  	char *token, *cur;
+	int i;
+	unsigned long param_value[2];
+	struct tee *tee;
+	unsigned long val;
+
+	if(count >= 256) {
+		pr_err("%s %d count(%zu) > 256 \n", __func__, __LINE__, count);
+		return -EINVAL;
+	}
+
+	if (copy_from_user(local_buf, buffer, count)) {
+		pr_err("%s %d copy_from_user fail\n", __func__, __LINE__);
+		return -EFAULT;
+	}
+
+	local_buf[count] = 0;
+	cur = local_buf;
+
+	for (i = 0 ; i < (sizeof(param_value)/sizeof(param_value[0])) ; i++) {
+		int ret;
+
+		token = strsep(&cur, delim);
+		if (!token) {
+			pr_err("%s %d token is NULL\n", __func__, __LINE__);
+			return -EINVAL;
+		}
+
+		ret = kstrtoul(token, 16, &val);
+		if (ret) {
+			pr_err("%s %d kstrtoul error:%d\n", __func__, __LINE__, ret);
+			return ret;
+		}
+		param_value[i] = val;
+	}
+
+	printk("\033[0;32;31m [RAMLOG] %s addr = 0x%lx , length = %lu\033[m\n",
+		__func__,param_value[0],param_value[1]);
+
+	if (tee_ramlog_set_addr_len(param_value[0],param_value[1])) {
+		pr_err("%s - can't configure ramlog\n", __func__);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static struct file_operations tz_fops = {
+	.owner   = THIS_MODULE, // system
+	.write   = tz_write,
+};
+
+static struct file_operations ramlog_fops = {
+	.owner	= THIS_MODULE, // system
+	.write	= tz_write_ramlog_addr,
+};
+
+static ssize_t tz_version_read(struct file *filp, char __user *buf,
+				size_t count, loff_t *f_pos)
+{
+	const char version_2_4[] = "2.4";
+	const char version_3_2[] = "3.2";
+
+	if (count < sizeof(version_3_2)) {
+		pr_err("%s(%d): invalid count\n", __func__, __LINE__);
+		return count;
+	}
+
+	if (optee_version == 3)
+		copy_to_user(buf , &version_3_2, sizeof(version_3_2));
+	else if (optee_version == 2)
+		copy_to_user(buf , &version_2_4, sizeof(version_2_4));
+
+	return count;
+
+}
+
+static struct file_operations tz_fops_version = {
+	.owner	= THIS_MODULE, // system
+	.read	= tz_version_read,
+};
+
+#define USER_ROOT_DIR "tz2_mstar"
+#endif
+
 static int __init optee_driver_init(void)
 {
 	struct device_node *fw_np;
 	struct device_node *np;
 	struct optee *optee;
+#ifdef CONFIG_MSTAR_CHIP
+	struct proc_dir_entry *root;
+	struct proc_dir_entry *dir;
+#endif
 
 	/* Node is supposed to be below /firmware */
 	fw_np = of_find_node_by_name(NULL, "firmware");
@@ -709,6 +1170,43 @@ static int __init optee_driver_init(void)
 
 	optee_svc = optee;
 
+#ifdef CONFIG_MSTAR_CHIP
+	root = proc_mkdir(USER_ROOT_DIR, NULL);
+	if (!root) {
+		pr_err("%s(%d): create /proc/%s failed!\n",
+			__func__, __LINE__, USER_ROOT_DIR);
+		return -ENOMEM;
+	}
+
+	dir = proc_create("ramlog_setup", 0644, root, &ramlog_fops);
+	if (!dir) {
+		pr_err("%s(%d): create /proc/%s/ramlog_setup failed!\n",
+			__func__, __LINE__, USER_ROOT_DIR);
+		return -ENOMEM;
+	}
+
+	dir = proc_create("log_level", 0644, root, &tz_fops);
+	if (!dir) {
+		pr_err("%s(%d): create /proc/%s/log_level failed!\n",
+			__func__, __LINE__, USER_ROOT_DIR);
+		remove_proc_entry(USER_ROOT_DIR, NULL);
+		return -ENOMEM;
+	}
+
+	dir = proc_create("version", 0644, root, &tz_fops_version);
+	if (!dir) {
+		pr_err("%s(%d): create /proc/%s/version failed!\n",
+			__func__, __LINE__, USER_ROOT_DIR);
+		remove_proc_entry(USER_ROOT_DIR, NULL);
+		return -ENOMEM;
+	}
+
+#ifdef CONFIG_PM
+	register_pm_notifier(&optee_pm_notifer);
+#endif
+	if (IS_ENABLED(CONFIG_TEE_2_4))
+		pr_warn("Warning: TEE Driver not supported OPTEE-2.4 in this kernel version!\n");
+#endif
 	return 0;
 }
 module_init(optee_driver_init);
@@ -720,6 +1218,12 @@ static void __exit optee_driver_exit(void)
 	optee_svc = NULL;
 	if (optee)
 		optee_remove(optee);
+#ifdef CONFIG_MSTAR_CHIP
+	remove_proc_subtree(USER_ROOT_DIR, NULL);
+#ifdef CONFIG_PM
+	unregister_pm_notifier(&optee_pm_notifer);
+#endif
+#endif
 }
 module_exit(optee_driver_exit);
 

@@ -213,7 +213,7 @@ int cpufreq_frequency_table_get_index(struct cpufreq_policy *policy,
 	int idx;
 
 	if (unlikely(!table)) {
-		pr_debug("%s: Unable to find frequency table\n", __func__);
+		pr_err("%s: Unable to find frequency table\n", __func__);
 		return -ENOENT;
 	}
 
@@ -225,6 +225,10 @@ int cpufreq_frequency_table_get_index(struct cpufreq_policy *policy,
 }
 EXPORT_SYMBOL_GPL(cpufreq_frequency_table_get_index);
 
+
+#ifdef CONFIG_MSTAR_DVFS
+extern unsigned int MDrvDvfsVerifyCpuClock(unsigned int dwCpuClock, unsigned int dwCpu);
+#endif
 /**
  * show_available_freqs - show available frequencies for the specified CPU
  */
@@ -251,6 +255,14 @@ static ssize_t show_available_freqs(struct cpufreq_policy *policy, char *buf,
 		 */
 		if (show_boost ^ (pos->flags & CPUFREQ_BOOST_FREQ))
 			continue;
+
+#ifdef CONFIG_MSTAR_DVFS
+		/* We don't allow others to see system max frequency. */
+		if ((pos->frequency > policy->cpuinfo.max_freq) || (pos->frequency < policy->cpuinfo.min_freq))
+			continue;
+		if (!MDrvDvfsVerifyCpuClock(pos->frequency/1000, policy->cpu))
+			continue;
+#endif
 
 		count += sprintf(&buf[count], "%d ", pos->frequency);
 	}

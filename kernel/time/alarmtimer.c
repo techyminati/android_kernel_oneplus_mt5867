@@ -153,6 +153,9 @@ static inline void alarmtimer_rtc_interface_remove(void) { }
 static inline void alarmtimer_rtc_timer_init(void) { }
 #endif
 
+#ifdef CONFIG_MSTAR_CHIP
+volatile unsigned int alarmtimer_debug = 0;
+#endif /* CONFIG_MSTAR_CHIP */
 /**
  * alarmtimer_enqueue - Adds an alarm timer to an alarm_base timerqueue
  * @base: pointer to the base where the timer is being run
@@ -164,8 +167,38 @@ static inline void alarmtimer_rtc_timer_init(void) { }
  */
 static void alarmtimer_enqueue(struct alarm_base *base, struct alarm *alarm)
 {
+#ifdef CONFIG_MSTAR_CHIP
+	struct rtc_time tm;
+	struct rtc_device *rtc;
+	ktime_t min, now;
+#endif /* CONFIG_MSTAR_CHIP */
 	if (alarm->state & ALARMTIMER_STATE_ENQUEUED)
 		timerqueue_del(&base->timerqueue, &alarm->node);
+
+#ifdef CONFIG_MSTAR_CHIP
+	if (alarmtimer_debug) {
+		pr_notice("alarmtimer_enqueue, the process is \"%s\" (pid  %i) .\n ",
+			  current->comm,current->pid);
+		tm = rtc_ktime_to_tm(alarm->node.expires);
+		//pr_notice("alarmtimer_enqueue-1, %d,%d,%d,%d,%d,%d .\n",
+		//	  tm.tm_year,tm.tm_mon,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec);
+
+		rtc = alarmtimer_get_rtcdev();
+		/* If we have no rtcdev, just return */
+		if (!rtc)
+			return;
+		rtc_read_time(rtc, &tm);
+		min = ktime_sub(alarm->node.expires, base->gettime());
+		now = rtc_tm_to_ktime(tm);
+		now = ktime_add(now, min);
+		tm = rtc_ktime_to_tm(now);
+		pr_notice("alarmtimer_enqueue, %d,%d,%d,%d,%d,%d .\n",
+			  tm.tm_year,tm.tm_mon,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec);
+		pr_notice("alarmtimer_enqueue, min = %lld ns to execute .\n",
+			  (long long)min);
+		dump_stack();
+	}
+#endif /* CONFIG_MSTAR_CHIP */
 
 	timerqueue_add(&base->timerqueue, &alarm->node);
 	alarm->state |= ALARMTIMER_STATE_ENQUEUED;
@@ -298,6 +331,14 @@ static int alarmtimer_suspend(struct device *dev)
 	rtc_read_time(rtc, &tm);
 	now = rtc_tm_to_ktime(tm);
 	now = ktime_add(now, min);
+
+#ifdef CONFIG_MSTAR_CHIP
+	tm = rtc_ktime_to_tm(now);
+	pr_notice("alarmtimer_suspend, %d,%d,%d,%d,%d,%d .\n",
+		  tm.tm_year,tm.tm_mon,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec);
+	pr_notice("alarmtimer_suspend, min = %lld ns to execute .\n",
+		  (long long)min);
+#endif /* CONFIG_MSTAR_CHIP */
 
 	/* Set alarm, if in the past reject suspend briefly to handle */
 	ret = rtc_timer_start(rtc, &rtctimer, now, 0);

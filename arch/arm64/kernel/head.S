@@ -42,6 +42,15 @@
 #include <asm/sysreg.h>
 #include <asm/thread_info.h>
 #include <asm/virt.h>
+#include <mstar/mpatch_macro.h>
+
+#ifdef CONFIG_MP_MSTAR_STR_BASE
+#include <mach/pm.h>
+#endif
+
+#ifdef CONFIG_MP_PLATFORM_3G_MIU0
+#include <mstar/mstar_chip.h>
+#endif
 
 #include "efi-header.S"
 
@@ -81,10 +90,28 @@ _head:
 	 * its opcode forms the magic "MZ" signature required by UEFI.
 	 */
 	add	x13, x18, #0x16
+#ifdef CONFIG_MP_PLATFORM_3G_MIU0
+        ldr     x5,=MSTAR_MIU0_BUS_BASE_H
+        ldr     x6,=MSTAR_MIU0_BUS_BASE_L
+        sub     x5,x5,x6
+        adrp    x6,stext
+        add     x6,x5,x6
+        br      x6
+#else
 	b	stext
+#endif
+#else
+#ifdef CONFIG_MP_PLATFORM_3G_MIU0
+        ldr     x5,=MSTAR_MIU0_BUS_BASE_H
+        ldr     x6,=MSTAR_MIU0_BUS_BASE_L
+        sub     x5,x5,x6
+        adrp    x6,stext
+        add     x6,x5,x6
+        br      x6
 #else
 	b	stext				// branch to kernel start, magic
 	.long	0				// reserved
+#endif
 #endif
 	le64sym	_kernel_offset_le		// Image load offset from start of RAM, little-endian
 	le64sym	_kernel_size_le			// Effective size of kernel image, little-endian
@@ -101,7 +128,16 @@ pe_header:
 #else
 	.long	0				// reserved
 #endif
-
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
+	__ramdisk_start:
+	.quad 0					// change to 64 bit (use long will be 4-byte only
+	__ramdisk_len:
+	.quad 0					// change to 64 bit (use long will be 4-byte only
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB)
+	__cmdline:
+	.quad 0					// change to 64 bit (use long will be 4-byte only
+#endif
+#endif
 	__INIT
 
 	/*
@@ -117,6 +153,29 @@ pe_header:
 	 *                                        current RELR displacement
 	 */
 ENTRY(stext)
+#ifdef CONFIG_MP_MSTAR_STR_BASE
+	ldr	x5, = AC_ON_CHECK_REG
+	ldr	w7, [x5]
+	bic	w7, w7, #0x0FFF
+	ldr	w6, =0x0000
+	cmp	w7, w6
+	bne	normal_boot
+	adr_l	x5, sleep_wakeup_first
+	br	x5
+normal_boot:
+#endif
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
+	adr_l	x0, __ramdisk_start
+	adr_l	x1, __ramdisk_len
+	str     w3, [x0]
+	str     w4, [x1]
+	#save the bootargs pointer which is passed by MBoot in w2(r2 in 32 bit)
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB)
+	adr_l	x0, __cmdline
+	str		w2, [x0]
+#endif
+	mov	x0, 0x23000000			// tempary patch assume FDT is at 0x23000000
+#endif
 	bl	preserve_boot_args
 	bl	el2_setup			// Drop to EL1, w0=cpu_boot_mode
 	adrp	x23, __PHYS_OFFSET
@@ -172,7 +231,6 @@ ENDPROC(preserve_boot_args)
 	str	\tmp2, [\tbl, \tmp1, lsl #3]
 	add	\tbl, \tbl, #PAGE_SIZE		// next level table page
 	.endm
-
 /*
  * Macro to populate page table entries, these entries can be pointers to the next level
  * or last level entries pointing to physical memory.
@@ -437,6 +495,16 @@ __primary_switched:
 	sub	x2, x2, x0
 	bl	__pi_memset
 	dsb	ishst				// Make zero page visible to PTW
+
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
+	ldr_l   x0, __ramdisk_start
+	ldr_l   x1, __ramdisk_len
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB)
+	# pass cmdline to c code of kernel
+	ldr_l   x2, __cmdline
+#endif
+	bl      mstar_get_ramdisk_info
+#endif
 
 #ifdef CONFIG_KASAN
 	bl	kasan_early_init

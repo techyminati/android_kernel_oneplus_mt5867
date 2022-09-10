@@ -23,6 +23,9 @@
 #include <linux/mtd/bbm.h>
 #include <linux/of.h>
 #include <linux/types.h>
+#if defined(CONFIG_PLAT_MSTAR)
+#include <mstar/mpatch_macro.h>
+#endif
 
 struct nand_flash_dev;
 
@@ -40,6 +43,19 @@ void nand_wait_ready(struct mtd_info *mtd);
 
 /* The maximum number of NAND chips in an array */
 #define NAND_MAX_CHIPS		8
+
+#if (defined(CONFIG_MSTAR_NAND) || defined(CONFIG_MSTAR_SPI_NAND)) && (MP_NAND_MTD == 1)
+/* the number of blocks reserved for bad block table */
+#define NAND_BBT_BLOCK_NUM  4
+#endif
+
+# if (MP_NAND_BBT == 1)
+/* the number of blocks reserved for bad block table */
+#define NAND_BBT_BLOCK_NUM  4
+
+/* the max number of bbt block operation */
+#define NAND_RETRIES     3
+#endif
 
 /*
  * Constants for hardware specific CLE/ALE/NCE function
@@ -68,6 +84,9 @@ void nand_wait_ready(struct mtd_info *mtd);
 #define NAND_CMD_READOOB	0x50
 #define NAND_CMD_ERASE1		0x60
 #define NAND_CMD_STATUS		0x70
+#if defined(CONFIG_MSTAR_NAND)
+#define NAND_CMD_STATUS_MULTI	0x71
+#endif
 #define NAND_CMD_SEQIN		0x80
 #define NAND_CMD_RNDIN		0x85
 #define NAND_CMD_READID		0x90
@@ -170,6 +189,9 @@ enum nand_ecc_algo {
 
 /* Device needs 3rd row address cycle */
 #define NAND_ROW_ADDR_3		0x00004000
+#if (defined(CONFIG_MSTAR_NAND) || defined(CONFIG_MSTAR_SPI_NAND)) && (MP_NAND_MTD == 1)
+#define NAND_IS_SPI		0x00008000
+#endif
 
 /* Options valid for Samsung large page devices */
 #define NAND_SAMSUNG_LP_OPTIONS NAND_CACHEPRG
@@ -195,7 +217,11 @@ enum nand_ecc_algo {
  * This option could be defined by controller drivers to protect against
  * kmap'ed, vmalloc'ed highmem buffers being passed from upper layers
  */
+#if defined(CONFIG_MSTAR_NAND)
+#define NAND_USE_BOUNCE_BUFFER	0x00080000
+#else
 #define NAND_USE_BOUNCE_BUFFER	0x00100000
+#endif
 
 /*
  * In case your controller is implementing ->cmd_ctrl() and is relying on the
@@ -1324,6 +1350,11 @@ struct nand_chip {
 	int pagemask;
 	u8 *data_buf;
 	int pagebuf;
+#if (defined(CONFIG_MSTAR_NAND) || defined(CONFIG_MSTAR_SPI_NAND)) && (MP_NAND_MTD == 1)
+	// read from col
+	int col;
+	int bytelen;
+#endif
 	unsigned int pagebuf_bitflips;
 	int subpagesize;
 	uint8_t bits_per_cell;
@@ -1352,6 +1383,9 @@ struct nand_chip {
 	struct nand_controller dummy_controller;
 
 	uint8_t *bbt;
+#if (defined(CONFIG_MSTAR_NAND) || defined(CONFIG_MSTAR_SPI_NAND)) && (MP_NAND_MTD == 1)
+	uint32_t    bbt_crc;
+#endif
 	struct nand_bbt_descr *bbt_td;
 	struct nand_bbt_descr *bbt_md;
 
@@ -1554,6 +1588,10 @@ int nand_isreserved_bbt(struct mtd_info *mtd, loff_t offs);
 int nand_isbad_bbt(struct mtd_info *mtd, loff_t offs, int allowbbt);
 int nand_erase_nand(struct mtd_info *mtd, struct erase_info *instr,
 		    int allowbbt);
+#if (MP_NAND_BBT == 1)
+extern int nand_update_td(struct mtd_info *mtd, loff_t offs);
+extern int nand_update_md(struct mtd_info *mtd, loff_t offs);
+#endif
 
 /**
  * struct platform_nand_chip - chip level device structure

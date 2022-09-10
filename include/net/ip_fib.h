@@ -72,7 +72,11 @@ struct fnhe_hash_bucket {
 	struct fib_nh_exception __rcu	*chain;
 };
 
-#define FNHE_HASH_SHIFT		11
+#ifdef CONFIG_MP_CMA_PATCH_DISABLE_HIORDER
+#define FNHE_HASH_SHIFT     10      // 1024
+#else
+#define FNHE_HASH_SHIFT     11      // 2048
+#endif
 #define FNHE_HASH_SIZE		(1 << FNHE_HASH_SHIFT)
 #define FNHE_RECLAIM_DEPTH	5
 

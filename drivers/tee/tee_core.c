@@ -928,6 +928,141 @@ void *tee_get_drvdata(struct tee_device *teedev)
 }
 EXPORT_SYMBOL_GPL(tee_get_drvdata);
 
+#ifdef CONFIG_MSTAR_CHIP
+#ifdef CONFIG_TEE_2_4
+struct match_dev_data {
+	struct tee_ioctl_version_data *vers;
+	const void *data;
+	int (*match)(struct tee_ioctl_version_data *, const void *);
+};
+
+static int match_dev(struct device *dev, const void *data)
+{
+	const struct match_dev_data *match_data = data;
+	struct tee_device *teedev = container_of(dev, struct tee_device, dev);
+
+	teedev->desc->ops->get_version(teedev, match_data->vers);
+	return match_data->match(match_data->vers, match_data->data);
+}
+
+static struct tee_context *_teedev_open(struct tee_device *teedev)
+{
+	int rc;
+	struct tee_context *ctx;
+
+	if (!tee_device_get(teedev))
+		return ERR_PTR(-EINVAL);
+
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx) {
+		rc = -ENOMEM;
+		goto err;
+	}
+
+	kref_init(&ctx->refcount);
+	ctx->teedev = teedev;
+	INIT_LIST_HEAD(&ctx->list_shm);
+	rc = teedev->desc->ops->open(ctx);
+	if (rc)
+		goto err;
+
+	return ctx;
+err:
+	kfree(ctx);
+	tee_device_put(teedev);
+	return ERR_PTR(rc);
+
+}
+
+struct tee_context *tee_client_open_context(struct tee_context *start,
+			int (*match)(struct tee_ioctl_version_data *,
+				const void *),
+			const void *data, struct tee_ioctl_version_data *vers)
+{
+	struct device *dev = NULL;
+	struct device *put_dev = NULL;
+	struct tee_context *ctx = NULL;
+	struct tee_ioctl_version_data v;
+	struct match_dev_data match_data = { vers ? vers : &v, data, match };
+
+	if (start)
+		dev = &start->teedev->dev;
+
+	do {
+		dev = class_find_device(tee_class, dev, &match_data, match_dev);
+		if (!dev) {
+			ctx = ERR_PTR(-ENOENT);
+			break;
+		}
+
+		put_device(put_dev);
+		put_dev = dev;
+
+		ctx = _teedev_open(container_of(dev, struct tee_device, dev));
+	} while (IS_ERR(ctx) && PTR_ERR(ctx) != -ENOMEM);
+
+	put_device(put_dev);
+	return ctx;
+}
+EXPORT_SYMBOL_GPL(tee_client_open_context);
+
+void tee_client_close_context(struct tee_context *ctx)
+{
+	teedev_close_context(ctx);
+}
+
+EXPORT_SYMBOL_GPL(tee_client_close_context);
+
+void tee_client_get_version(struct tee_context *ctx,
+			struct tee_ioctl_version_data *vers)
+{
+	ctx->teedev->desc->ops->get_version(ctx->teedev, vers);
+}
+EXPORT_SYMBOL_GPL(tee_client_get_version);
+
+
+int tee_client_open_session(struct tee_context *ctx,
+			struct tee_ioctl_open_session_arg *arg,
+			struct tee_param *param)
+{
+	if (!ctx->teedev->desc->ops->open_session)
+		return -EINVAL;
+	return ctx->teedev->desc->ops->open_session(ctx, arg, param);
+}
+EXPORT_SYMBOL_GPL(tee_client_open_session);
+
+int tee_client_close_session(struct tee_context *ctx, u32 session)
+{
+	if (!ctx->teedev->desc->ops->close_session)
+		return -EINVAL;
+	return ctx->teedev->desc->ops->close_session(ctx, session);
+}
+EXPORT_SYMBOL_GPL(tee_client_close_session);
+
+int tee_client_invoke_func(struct tee_context *ctx,
+			struct tee_ioctl_invoke_arg *arg,
+			struct tee_param *param)
+{
+	if (!ctx->teedev->desc->ops->invoke_func)
+		return -EINVAL;
+	return ctx->teedev->desc->ops->invoke_func(ctx, arg, param);
+}
+EXPORT_SYMBOL_GPL(tee_client_invoke_func);
+
+struct tee_shm *tee_client_shm_alloc(struct tee_context *ctx, size_t size, u32 flags)
+{
+	return tee_shm_alloc(ctx, size, flags);
+}
+EXPORT_SYMBOL(tee_client_shm_alloc);
+
+void *tee_client_shm_get_va(struct tee_shm *shm, size_t offs)
+{
+	return tee_shm_get_va(shm ,offs);
+}
+EXPORT_SYMBOL(tee_client_shm_get_va);
+#endif
+#endif
+
 static int __init tee_init(void)
 {
 	int rc;

@@ -27,12 +27,20 @@
  * occurring in the opposite direction.
  */
 
+#ifdef CONFIG_KASAN
+.weak memmove
+ENTRY(__memmove)
+#endif
 ENTRY(memmove)
 	UNWIND(	.fnstart			)
 
 		subs	ip, r0, r1
 		cmphi	r2, ip
+#ifdef CONFIG_KASAN
+		bls	__memcpy
+#else
 		bls	memcpy
+#endif
 
 		stmfd	sp!, {r0, r4, lr}
 	UNWIND(	.fnend				)
@@ -225,3 +233,6 @@ ENTRY(memmove)
 18:		backward_copy_shift	push=24	pull=8
 
 ENDPROC(memmove)
+#ifdef CONFIG_KASAN
+ENDPROC(__memmove)
+#endif

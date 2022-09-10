@@ -2527,13 +2527,31 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		goto oom;
 
 	if (is_zero_pfn(pte_pfn(vmf->orig_pte))) {
+#ifdef CONFIG_MSTAR_CHIP
+		if(vma->vm_flags & VM_LOCKED)
+			new_page = __alloc_zeroed_user_highpage(0, vma,
+								vmf->address);
+		else
+			new_page = alloc_zeroed_user_highpage_movable(vma,
+								vmf->address);
+#else
 		new_page = alloc_zeroed_user_highpage_movable(vma,
 							      vmf->address);
+#endif
 		if (!new_page)
 			goto oom;
 	} else {
+#ifdef CONFIG_MSTAR_CHIP
+		if(vma->vm_flags & VM_LOCKED)
+			new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE & ~__GFP_MOVABLE,
+					vma, vmf->address);
+		else
+			new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma,
+				vmf->address);
+#else
 		new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma,
 				vmf->address);
+#endif
 		if (!new_page)
 			goto oom;
 		cow_user_page(new_page, old_page, vmf->address, vma);
@@ -3197,7 +3215,14 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	/* Allocate our own private page. */
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
+#ifdef CONFIG_MSTAR_CHIP
+	if(vma->vm_flags & VM_LOCKED)
+		page = __alloc_zeroed_user_highpage(0, vma, vmf->address);
+	else
+		 page = alloc_zeroed_user_highpage_movable(vma, vmf->address);
+#else
 	page = alloc_zeroed_user_highpage_movable(vma, vmf->address);
+#endif
 	if (!page)
 		goto oom;
 
@@ -3719,7 +3744,16 @@ static vm_fault_t do_cow_fault(struct vm_fault *vmf)
 	if (unlikely(anon_vma_prepare(vma)))
 		return VM_FAULT_OOM;
 
+#ifdef CONFIG_MSTAR_CHIP
+	if(vma->vm_flags & VM_LOCKED)
+		vmf->cow_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE & ~__GFP_MOVABLE,
+						vma, vmf->address);
+	else
+		vmf->cow_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE,
+						vma, vmf->address);
+#else
 	vmf->cow_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, vmf->address);
+#endif
 	if (!vmf->cow_page)
 		return VM_FAULT_OOM;
 
@@ -4109,6 +4143,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 {
 	struct vm_fault vmf = {
 		.vma = vma,
+		.fault_real_address = address,
 		.address = address & PAGE_MASK,
 		.flags = flags,
 		.pgoff = linear_page_index(vma, address),

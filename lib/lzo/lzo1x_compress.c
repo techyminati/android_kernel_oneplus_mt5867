@@ -17,10 +17,17 @@
 #include <linux/lzo.h>
 #include "lzodefs.h"
 
+#ifdef CONFIG_MP_ZSM
+static noinline size_t
+lzo1x_1_do_compress(const unsigned char *in, size_t in_len,
+		    unsigned char *out, size_t *out_len,
+		    size_t ti, void *wrkmem, int *tmp_hash)
+#else
 static noinline size_t
 lzo1x_1_do_compress(const unsigned char *in, size_t in_len,
 		    unsigned char *out, size_t *out_len,
 		    size_t ti, void *wrkmem)
+#endif
 {
 	const unsigned char *ip;
 	unsigned char *op;
@@ -28,6 +35,9 @@ lzo1x_1_do_compress(const unsigned char *in, size_t in_len,
 	const unsigned char * const ip_end = in + in_len - 20;
 	const unsigned char *ii;
 	lzo_dict_t * const dict = (lzo_dict_t *) wrkmem;
+#ifdef CONFIG_MP_ZSM
+	int t_total = 0, old_t = 0;
+#endif
 
 	op = out;
 	ip = in;
@@ -44,7 +54,17 @@ next:
 		if (unlikely(ip >= ip_end))
 			break;
 		dv = get_unaligned_le32(ip);
+#ifdef CONFIG_MP_ZSM
+		t = ((dv * 0x1824429d) >> (32 - D_BITS));
+		if (tmp_hash != NULL) {
+			*tmp_hash += (int)(t - old_t);
+			old_t = t;
+			t_total += t;
+		}
+		t = t & D_MASK;
+#else
 		t = ((dv * 0x1824429d) >> (32 - D_BITS)) & D_MASK;
+#endif
 		m_pos = in + dict[t];
 		dict[t] = (lzo_dict_t) (ip - in);
 		if (unlikely(dv != get_unaligned_le32(m_pos)))
@@ -210,6 +230,11 @@ m_len_done:
 		goto next;
 	}
 	*out_len = op - out;
+#ifdef CONFIG_MP_ZSM
+	if (t_total > *tmp_hash) {
+		*tmp_hash = t_total;
+	}
+#endif
 	return in_end - (ii - ti);
 }
 
@@ -221,6 +246,9 @@ int lzo1x_1_compress(const unsigned char *in, size_t in_len,
 	unsigned char *op = out;
 	size_t l = in_len;
 	size_t t = 0;
+#ifdef CONFIG_MP_ZSM
+	unsigned int tmp_hash = 0;
+#endif
 
 	while (l > 20) {
 		size_t ll = l <= (M4_MAX_OFFSET + 1) ? l : (M4_MAX_OFFSET + 1);
@@ -229,7 +257,11 @@ int lzo1x_1_compress(const unsigned char *in, size_t in_len,
 			break;
 		BUILD_BUG_ON(D_SIZE * sizeof(lzo_dict_t) > LZO1X_1_MEM_COMPRESS);
 		memset(wrkmem, 0, D_SIZE * sizeof(lzo_dict_t));
+#ifdef CONFIG_MP_ZSM
+		t = lzo1x_1_do_compress(ip, ll, op, out_len, t, wrkmem, &tmp_hash);
+#else
 		t = lzo1x_1_do_compress(ip, ll, op, out_len, t, wrkmem);
+#endif
 		ip += ll;
 		op += *out_len;
 		l  -= ll;
@@ -274,6 +306,100 @@ int lzo1x_1_compress(const unsigned char *in, size_t in_len,
 	return LZO_E_OK;
 }
 EXPORT_SYMBOL_GPL(lzo1x_1_compress);
+
+#ifdef CONFIG_MP_ZSM
+int lzo1x_1_compress_crc(const unsigned char *in, size_t in_len,
+			unsigned char *out, size_t *out_len,
+			void *wrkmem, u32 *checksum)
+{
+	const unsigned char *ip = in;
+	unsigned char *op = out;
+	unsigned int tmp_hash = 0;
+	unsigned int old_hash = 0;
+	unsigned int hash_total = 0;
+	size_t l = in_len;
+	size_t t = 0;
+	unsigned int out_hash = 0;
+
+	while (l > 20) {
+		size_t ll = l <= (M4_MAX_OFFSET + 1) ? l : (M4_MAX_OFFSET + 1);
+		uintptr_t ll_end = (uintptr_t) ip + ll;
+
+		if ((ll_end + ((t + ll) >> 5)) <= ll_end)
+			break;
+		BUILD_BUG_ON(D_SIZE * sizeof(lzo_dict_t) > LZO1X_1_MEM_COMPRESS);
+		memset(wrkmem, 0, D_SIZE * sizeof(lzo_dict_t));
+		t = lzo1x_1_do_compress(ip, ll, op, out_len, t, wrkmem, &tmp_hash);
+		if (checksum != NULL) {
+			(*checksum) += (tmp_hash - old_hash);
+			old_hash = tmp_hash;
+			hash_total += tmp_hash;
+		}
+		if (*out_len >= 4) {
+			unsigned char *tmp_op = op;
+
+			out_hash = out_hash ^ *tmp_op;
+		}
+
+
+		ip += ll;
+		op += *out_len;
+		l  -= ll;
+	}
+	t += l;
+
+	if (t > 0) {
+		const unsigned char *ii = in + in_len - t;
+
+		if (op == out && t <= 238) {
+			*op++ = (17 + t);
+		} else if (t <= 3) {
+			op[-2] |= t;
+		} else if (t <= 18) {
+			*op++ = (t - 3);
+		} else {
+			size_t tt = t - 18;
+			*op++ = 0;
+			while (tt > 255) {
+				tt -= 255;
+				*op++ = 0;
+			}
+			*op++ = tt;
+		}
+		if (t >= 16)
+			do {
+				COPY8(op, ii);
+				COPY8(op + 8, ii + 8);
+				op += 16;
+				ii += 16;
+				t -= 16;
+			} while (t >= 16);
+		if (t > 0)
+			do {
+				*op++ = *ii++;
+			} while (--t > 0);
+	}
+
+	*op++ = M4_MARKER | 1;
+	*op++ = 0;
+	*op++ = 0;
+
+	*out_len = op - out;
+	if (hash_total > (unsigned int)*checksum)
+		*checksum = hash_total;
+	if (out_hash != 0)
+		*checksum = out_hash^(unsigned int)*checksum;
+	if (*out_len >= 4) {
+		unsigned char *tmp_out = out;
+		unsigned int tmp_checksum = 0;
+
+		tmp_checksum = (unsigned int)*checksum+(unsigned int)*tmp_out;
+		*checksum = (int)tmp_checksum;
+	}
+	return LZO_E_OK;
+}
+EXPORT_SYMBOL_GPL(lzo1x_1_compress_crc);
+#endif
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("LZO1X-1 Compressor");

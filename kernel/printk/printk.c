@@ -58,6 +58,12 @@
 #include "braille.h"
 #include "internal.h"
 
+#if defined(CONFIG_MP_DEBUG_TOOL_LOG_PREFIX)
+/*/printk prefix {*/
+static DEFINE_PER_CPU(char, printk_state);
+/*printk prefix }*/
+#endif
+
 int console_printk[4] = {
 	CONSOLE_LOGLEVEL_DEFAULT,	/* console_loglevel */
 	MESSAGE_LOGLEVEL_DEFAULT,	/* default_message_loglevel */
@@ -105,7 +111,7 @@ enum devkmsg_log_masks {
 /* Keep both the 'on' and 'off' bits clear, i.e. ratelimit by default: */
 #define DEVKMSG_LOG_MASK_DEFAULT	0
 
-static unsigned int __read_mostly devkmsg_log = DEVKMSG_LOG_MASK_DEFAULT;
+static unsigned int __read_mostly devkmsg_log = DEVKMSG_LOG_MASK_ON;
 
 static int __control_devkmsg(char *str)
 {
@@ -595,6 +601,22 @@ static int log_store(int facility, int level,
 	u32 size, pad_len;
 	u16 trunc_msg_len = 0;
 
+#if defined(CONFIG_MP_DEBUG_TOOL_LOG_PREFIX)
+        /*printk prefix {*/
+        int this_cpu = smp_processor_id();
+        char state = per_cpu(printk_state, this_cpu);
+        char tbuf[50];
+        unsigned int tlen;
+        if (console_suspended == 0) {
+                tlen = snprintf(tbuf, sizeof(tbuf), "%c(%x)[%d:%s] ",
+                                state, this_cpu, current->pid, current->comm);
+        } else {
+                tlen = snprintf(tbuf, sizeof(tbuf), "%c%x) ", state, this_cpu);
+        }
+        /*printk prefix }*/
+        text_len += tlen;
+#endif
+
 	/* number of '\0' padding bytes to next message */
 	size = msg_used_size(text_len, dict_len, &pad_len);
 
@@ -619,7 +641,15 @@ static int log_store(int facility, int level,
 
 	/* fill message */
 	msg = (struct printk_log *)(log_buf + log_next_idx);
+
+#if defined(CONFIG_MP_DEBUG_TOOL_LOG_PREFIX)
+        /*printk prefix {*/
+        memcpy(log_text(msg), tbuf, tlen);
+        memcpy(log_text(msg) + tlen, text, text_len);
+        /*printk prefix }*/
+#else
 	memcpy(log_text(msg), text, text_len);
+#endif
 	msg->text_len = text_len;
 	if (trunc_msg_len) {
 		memcpy(log_text(msg) + text_len, trunc_msg, trunc_msg_len);
@@ -1894,6 +1924,16 @@ int vprintk_store(int facility, int level,
 	if (dict)
 		lflags |= LOG_PREFIX|LOG_NEWLINE;
 
+#if defined(CONFIG_MP_DEBUG_TOOL_LOG_PREFIX)
+        /*printk prefix {*/
+        if (in_irq_disable)
+               per_cpu(printk_state, this_cpu) = '-';
+        else if (in_non_preempt)
+               per_cpu(printk_state, this_cpu) = '!';
+        else
+               per_cpu(printk_state, this_cpu) = ' ';
+        /*printk prefix }*/
+#endif
 	return log_output(facility, level, lflags,
 			  dict, dictlen, text, text_len);
 }
@@ -1906,6 +1946,13 @@ asmlinkage int vprintk_emit(int facility, int level,
 	bool in_sched = false, pending_output;
 	unsigned long flags;
 	u64 curr_log_seq;
+#if defined(CONFIG_MP_DEBUG_TOOL_LOG_PREFIX)
+        /*printk prefix {*/
+        int in_irq_disable, in_non_preempt;
+        in_irq_disable = irqs_disabled();
+        in_non_preempt = in_atomic();
+        /*printk prefix }*/
+#endif
 
 	if (level == LOGLEVEL_SCHED) {
 		level = LOGLEVEL_DEFAULT;

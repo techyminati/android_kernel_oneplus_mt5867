@@ -68,6 +68,7 @@ static struct inode *alloc_inode(struct super_block *sb);
 static void free_inode(struct inode *inode);
 static void evict_inode(struct inode *inode);
 
+static int incfs_setattr(struct dentry *dentry, struct iattr *ia);
 static ssize_t incfs_getxattr(struct dentry *d, const char *name,
 			void *value, size_t size);
 static ssize_t incfs_setxattr(struct dentry *d, const char *name,
@@ -98,7 +99,8 @@ static const struct inode_operations incfs_dir_inode_ops = {
 	.rename = dir_rename_wrap,
 	.unlink = dir_unlink,
 	.link = dir_link,
-	.rmdir = dir_rmdir
+	.rmdir = dir_rmdir,
+	.setattr = incfs_setattr,
 };
 
 static const struct file_operations incfs_dir_fops = {
@@ -158,7 +160,7 @@ static const struct file_operations incfs_log_file_ops = {
 };
 
 static const struct inode_operations incfs_file_inode_ops = {
-	.setattr = simple_setattr,
+	.setattr = incfs_setattr,
 	.getattr = simple_getattr,
 	.listxattr = incfs_listxattr
 };
@@ -204,6 +206,8 @@ struct inode_search {
 	unsigned long ino;
 
 	struct dentry *backing_dentry;
+
+	size_t size;
 };
 
 enum parse_parameter {
@@ -362,13 +366,14 @@ static int inode_set(struct inode *inode, void *opaque)
 
 		fsstack_copy_attr_all(inode, backing_inode);
 		if (S_ISREG(inode->i_mode)) {
-			u64 size = read_size_attr(backing_dentry);
+			u64 size = search->size;
 
 			inode->i_size = size;
 			inode->i_blocks = get_blocks_count_for_size(size);
 			inode->i_mapping->a_ops = &incfs_address_space_ops;
 			inode->i_op = &incfs_file_inode_ops;
 			inode->i_fop = &incfs_file_ops;
+			inode->i_mode &= ~0222;
 		} else if (S_ISDIR(inode->i_mode)) {
 			inode->i_size = 0;
 			inode->i_blocks = 1;
@@ -437,7 +442,8 @@ static struct inode *fetch_regular_inode(struct super_block *sb,
 	struct inode *backing_inode = d_inode(backing_dentry);
 	struct inode_search search = {
 		.ino = backing_inode->i_ino,
-		.backing_dentry = backing_dentry
+		.backing_dentry = backing_dentry,
+		.size = read_size_attr(backing_dentry),
 	};
 	struct inode *inode = iget5_locked(sb, search.ino, inode_test,
 				inode_set, &search);
@@ -640,7 +646,7 @@ static __poll_t log_poll(struct file *file, poll_table *wait)
 	__poll_t ret = 0;
 
 	poll_wait(file, &mi->mi_log.ml_notif_wq, wait);
-	count = incfs_get_uncollected_logs_count(mi, log_state->state);
+	count = incfs_get_uncollected_logs_count(mi, &log_state->state);
 	if (count >= mi->mi_options.read_log_wakeup_count)
 		ret = EPOLLIN | EPOLLRDNORM;
 
@@ -809,7 +815,7 @@ static int read_single_page(struct file *f, struct page *page)
 		tmp.data = (u8 *)__get_free_pages(GFP_NOFS, get_order(tmp.len));
 		bytes_to_read = min_t(loff_t, size - offset, PAGE_SIZE);
 		read_result = incfs_read_data_file_block(
-			range(page_start, bytes_to_read), df, block_index,
+			range(page_start, bytes_to_read), f, block_index,
 			timeout_ms, tmp);
 
 		free_pages((unsigned long)tmp.data, get_order(tmp.len));
@@ -890,14 +896,15 @@ static int init_new_file(struct mount_info *mi, struct dentry *dentry,
 		.mnt = mi->mi_backing_dir_path.mnt,
 		.dentry = dentry
 	};
-	new_file = dentry_open(&path, O_RDWR | O_NOATIME, mi->mi_owner);
+	new_file = dentry_open(&path, O_RDWR | O_NOATIME | O_LARGEFILE,
+			       current_cred());
 
 	if (IS_ERR(new_file)) {
 		error = PTR_ERR(new_file);
 		goto out;
 	}
 
-	bfc = incfs_alloc_bfc(new_file);
+	bfc = incfs_alloc_bfc(mi, new_file);
 	fput(new_file);
 	if (IS_ERR(bfc)) {
 		error = PTR_ERR(bfc);
@@ -1018,7 +1025,7 @@ static int dir_relative_path_resolve(
 	if (dir_fd < 0)
 		return dir_fd;
 
-	dir_f = dentry_open(base_path, O_RDONLY | O_NOATIME, mi->mi_owner);
+	dir_f = dentry_open(base_path, O_RDONLY | O_NOATIME, current_cred());
 
 	if (IS_ERR(dir_f)) {
 		error = PTR_ERR(dir_f);
@@ -1896,10 +1903,13 @@ static int file_open(struct inode *inode, struct file *file)
 	struct file *backing_file = NULL;
 	struct path backing_path = {};
 	int err = 0;
+	const struct cred *old_cred;
 
 	get_incfs_backing_path(file->f_path.dentry, &backing_path);
-	backing_file = dentry_open(&backing_path, O_RDWR | O_NOATIME,
-				mi->mi_owner);
+	old_cred = override_creds(mi->mi_owner);
+	backing_file = dentry_open(&backing_path,
+			O_RDWR | O_NOATIME | O_LARGEFILE, current_cred());
+	revert_creds(old_cred);
 	path_put(&backing_path);
 
 	if (IS_ERR(backing_file)) {
@@ -2029,6 +2039,45 @@ static void evict_inode(struct inode *inode)
 	clear_inode(inode);
 }
 
+static int incfs_setattr(struct dentry *dentry, struct iattr *ia)
+{
+	struct dentry_info *di = get_incfs_dentry(dentry);
+	struct dentry *backing_dentry;
+	struct inode *backing_inode;
+	int error;
+
+	if (ia->ia_valid & ATTR_SIZE)
+		return -EINVAL;
+
+	if (!di)
+		return -EINVAL;
+	backing_dentry = di->backing_path.dentry;
+	if (!backing_dentry)
+		return -EINVAL;
+
+	backing_inode = d_inode(backing_dentry);
+
+	/* incfs files are readonly, but the backing files must be writeable */
+	if (S_ISREG(backing_inode->i_mode)) {
+		if ((ia->ia_valid & ATTR_MODE) && (ia->ia_mode & 0222))
+			return -EINVAL;
+
+		ia->ia_mode |= 0222;
+	}
+
+	inode_lock(d_inode(backing_dentry));
+	error = notify_change(backing_dentry, ia, NULL);
+	inode_unlock(d_inode(backing_dentry));
+
+	if (error)
+		return error;
+
+	if (S_ISREG(backing_inode->i_mode))
+		ia->ia_mode &= ~0222;
+
+	return simple_setattr(dentry, ia);
+}
+
 static ssize_t incfs_getxattr(struct dentry *d, const char *name,
 			void *value, size_t size)
 {
@@ -2131,7 +2180,7 @@ struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,
 	sb->s_op = &incfs_super_ops;
 	sb->s_d_op = &incfs_dentry_ops;
 	sb->s_flags |= S_NOATIME;
-	sb->s_magic = INCFS_MAGIC_NUMBER;
+	sb->s_magic = (long)INCFS_MAGIC_NUMBER;
 	sb->s_time_gran = 1;
 	sb->s_blocksize = INCFS_DATA_FILE_BLOCK_SIZE;
 	sb->s_blocksize_bits = blksize_bits(sb->s_blocksize);

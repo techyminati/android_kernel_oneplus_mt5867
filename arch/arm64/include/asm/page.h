@@ -26,6 +26,11 @@
 #include <linux/personality.h> /* for READ_IMPLIES_EXEC */
 #include <asm/pgtable-types.h>
 
+extern u64 linux_memory_address,linux_memory_length;
+extern u64 linux_memory2_address,linux_memory2_length;
+extern u64 linux_memory3_address,linux_memory3_length;
+extern volatile unsigned int lx_num;
+
 extern void __cpu_clear_user_page(void *p, unsigned long user);
 extern void __cpu_copy_user_page(void *to, const void *from,
 				 unsigned long user);

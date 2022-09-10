@@ -828,4 +828,25 @@ enum dpm_order {
 	DPM_ORDER_DEV_LAST,
 };
 
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+struct str_waitfor_dev {
+	struct device *stage1_s_wait;
+	struct device *stage1_r_wait;
+	struct device *stage2_s_wait;
+	struct device *stage2_r_wait;
+};
+
+int of_mstar_str(const char *mod_name, struct device *dev,
+			const struct dev_pm_ops *pm,
+			struct str_waitfor_dev *waitfor,
+			int (*suspend_fn)(struct device *dev),
+			int (*resume_fn)(struct device *dev),
+			int (*suspend_fn2)(struct device *dev),
+			int (*resume_fn2)(struct device *dev));
+#endif
+
+#ifdef CONFIG_MSTAR_CHIP
+extern void add_timestamp(char *buffer);
+#endif
+
 #endif /* _LINUX_PM_H */

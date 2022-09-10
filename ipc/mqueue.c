@@ -1229,7 +1229,9 @@ retry:
 			}
 			if (ret) {
 				sock = NULL;
+#ifndef CONFIG_PLAT_MSTAR
 				nc = NULL;
+#endif
 				goto out;
 			}
 		}

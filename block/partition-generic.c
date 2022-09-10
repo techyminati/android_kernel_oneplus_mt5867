@@ -46,6 +46,14 @@ char *disk_name(struct gendisk *hd, int partno, char *buf)
 
 const char *bdevname(struct block_device *bdev, char *buf)
 {
+#if (1 == MP_SCSI_MSTAR_SD_CARD_IMMEDIATELY_UNPLUG)
+	if(NULL == bdev->bd_part)
+	{
+		printk("%s:%d  NULL == bdev->bd_part !!!!\n",__FUNCTION__,__LINE__);
+		snprintf(buf, BDEVNAME_SIZE, "%s", bdev->bd_disk->disk_name);
+		return buf;
+	}
+#endif
 	return disk_name(bdev->bd_disk, bdev->bd_part->partno, buf);
 }
 

@@ -8,4 +8,8 @@ ufshcd-core-objs := ufshcd.o ufs-sysfs.o
 obj-$(CONFIG_SCSI_UFSHCD_PCI) += ufshcd-pci.o
 obj-$(CONFIG_SCSI_UFSHCD_PLATFORM) += ufshcd-pltfrm.o
 obj-$(CONFIG_SCSI_UFS_HISI) += ufs-hisi.o
+ifeq ($(CONFIG_MSTAR_UFS),y)
+EXTRA_CFLAGS    += -Idrivers/mstar2/drv/ufs
+EXTRA_CFLAGS    += -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/ufs
+endif
 ufshcd-core-$(CONFIG_SCSI_UFS_CRYPTO) += ufshcd-crypto.o

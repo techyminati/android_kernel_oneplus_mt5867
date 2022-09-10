@@ -808,7 +808,11 @@ unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 	}
 
 	if (irq_domain_is_hierarchy(domain)) {
+#ifndef CONFIG_MP_PLATFORM_NATIVE_IRQ
+		virq = __irq_domain_alloc_irqs(domain, hwirq, 1, NUMA_NO_NODE, fwspec, false, NULL);	// we use hwirq as irq_base, then the virq will be as hwirq
+#else
 		virq = irq_domain_alloc_irqs(domain, 1, NUMA_NO_NODE, fwspec);
+#endif
 		if (virq <= 0)
 			return 0;
 	} else {

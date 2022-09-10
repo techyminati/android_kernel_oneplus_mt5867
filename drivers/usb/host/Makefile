@@ -6,6 +6,18 @@
 # tell define_trace.h where to find the xhci trace header
 CFLAGS_xhci-trace.o := -I$(src)
 
+# mstar_porting_plat >>>
+ifeq ($(CONFIG_ONEHAL_ARCH_SUPPORT),y)
+ONEHAL_VERSION = $(subst \",,$(CONFIG_ONEHAL_VERSION))
+ONEHAL_DIR = ver_$(ONEHAL_VERSION)
+EXTRA_CFLAGS      += -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/usb/$(ONEHAL_DIR)
+endif
+EXTRA_CFLAGS      += -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/usb
+#ifdef CONFIG_MSTAR_BDMA
+EXTRA_CFLAGS      += -Idrivers/mstar2/include
+#endif
+# mstar_porting_plat <<<
+
 fhci-y := fhci-hcd.o fhci-hub.o fhci-q.o
 fhci-y += fhci-mem.o fhci-tds.o fhci-sched.o
 
@@ -30,6 +42,10 @@ endif
 ifneq ($(CONFIG_USB_XHCI_RCAR), )
 	xhci-plat-hcd-y		+= xhci-rcar.o
 endif
+
+# mstar_porting_plat >>>
+xhci-hcd-$(CONFIG_MP_USB_MSTAR) += xhci-mstar.o xhci-mstar-sysfs.o
+# mstar_porting_plat <<<
 
 ifneq ($(CONFIG_DEBUG_FS),)
 	xhci-hcd-y		+= xhci-debugfs.o

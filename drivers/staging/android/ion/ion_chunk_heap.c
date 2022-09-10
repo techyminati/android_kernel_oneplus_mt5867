@@ -150,4 +150,3 @@ error_gen_pool_create:
 	kfree(chunk_heap);
 	return ERR_PTR(ret);
 }
-

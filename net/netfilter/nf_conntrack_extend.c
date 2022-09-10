@@ -102,8 +102,11 @@ int nf_ct_extend_register(const struct nf_ct_ext_type *type)
 		ret = -EBUSY;
 		goto out;
 	}
-
+#if defined(CONFIG_CC_IS_CLANG) && defined(CONFIG_MSTAR_CHIP)
+	rcu_assign_pointer(nf_ct_ext_types[type->id], (struct nf_ct_ext_type *)type);
+#else
 	rcu_assign_pointer(nf_ct_ext_types[type->id], type);
+#endif
 out:
 	mutex_unlock(&nf_ct_ext_type_mutex);
 	return ret;

@@ -25,6 +25,7 @@
 #include <linux/types.h>
 #include <linux/scatterlist.h>
 #include <mtd/ubi-user.h>
+#include <mstar/mpatch_macro.h>
 
 /* All voumes/LEBs */
 #define UBI_ALL -1
@@ -193,6 +194,9 @@ struct ubi_device_info {
 	int min_io_size;
 	int max_write_size;
 	int ro_mode;
+#if (MP_NAND_UBI == 1)
+	int is_mlc;
+#endif
 	dev_t cdev;
 };
 
@@ -249,6 +253,10 @@ int ubi_unregister_volume_notifier(struct notifier_block *nb);
 void ubi_close_volume(struct ubi_volume_desc *desc);
 int ubi_leb_read(struct ubi_volume_desc *desc, int lnum, char *buf, int offset,
 		 int len, int check);
+#if (MP_NAND_UBI == 1)
+int ubi_is_mlc_lsbpage(struct ubi_volume_desc *desc, int offset);
+int ubi_mlc_pairedpage(struct ubi_volume_desc *desc, int offset);
+#endif
 int ubi_leb_read_sg(struct ubi_volume_desc *desc, int lnum, struct ubi_sgl *sgl,
 		   int offset, int len, int check);
 int ubi_leb_write(struct ubi_volume_desc *desc, int lnum, const void *buf,

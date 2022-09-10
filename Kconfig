@@ -30,3 +30,6 @@ source "crypto/Kconfig"
 source "lib/Kconfig"
 
 source "lib/Kconfig.debug"
+
+# Mstar Patches
+source "Kconfig.mpatch"

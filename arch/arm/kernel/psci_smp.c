@@ -23,7 +23,7 @@
 
 #include <asm/psci.h>
 #include <asm/smp_plat.h>
-
+#include <linux/percpu.h>
 /*
  * psci_smp assumes that the following is true about PSCI:
  *
@@ -114,17 +114,60 @@ int psci_cpu_kill(unsigned int cpu)
 
 #endif
 
+#ifdef CONFIG_MSTAR_CHIP
+#define PSCI_POWER_STATE_ID_MASK	0xffff
+#define PSCI_POWER_STATE_ID_SHIFT	0
+#define PSCI_POWER_STATE_TYPE_MASK	0x1
+#define PSCI_POWER_STATE_TYPE_SHIFT	16
+#define PSCI_POWER_STATE_AFFL_MASK	0x3
+#define PSCI_POWER_STATE_AFFL_SHIFT	24
+
+struct psci_power_state {
+	u16	id;
+	u8	type;
+	u8	affinity_level;
+};
+
+static u32 psci_power_state_pack(struct psci_power_state state)
+{
+	return	((state.id & PSCI_POWER_STATE_ID_MASK)
+			<< PSCI_POWER_STATE_ID_SHIFT)	|
+		((state.type & PSCI_POWER_STATE_TYPE_MASK)
+			<< PSCI_POWER_STATE_TYPE_SHIFT)	|
+		((state.affinity_level & PSCI_POWER_STATE_AFFL_MASK)
+			<< PSCI_POWER_STATE_AFFL_SHIFT);
+}
+
+int psci_suspend(unsigned long index,void *entry_point)
+{
+	struct psci_power_state state = {0};
+        u32 power_state;
+
+	state.type = 1;
+        power_state = psci_power_state_pack(state);
+
+	return psci_ops.cpu_suspend(power_state, virt_to_phys(entry_point));
+}
+#endif
+
 bool __init psci_smp_available(void)
 {
 	/* is cpu_on available at least? */
 	return (psci_ops.cpu_on != NULL);
 }
 
+#ifdef CONFIG_MSTAR_CHIP
+const struct smp_operations psci_smp_ops = {
+#else
 const struct smp_operations psci_smp_ops __initconst = {
+#endif
 	.smp_boot_secondary	= psci_boot_secondary,
 #ifdef CONFIG_HOTPLUG_CPU
 	.cpu_disable		= psci_cpu_disable,
 	.cpu_die		= psci_cpu_die,
 	.cpu_kill		= psci_cpu_kill,
+#ifdef CONFIG_MSTAR_CHIP
+	.cpu_suspend		= psci_suspend,
+#endif
 #endif
 };

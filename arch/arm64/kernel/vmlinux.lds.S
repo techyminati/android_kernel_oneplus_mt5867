@@ -11,8 +11,7 @@
 #include <asm/thread_info.h>
 #include <asm/memory.h>
 #include <asm/page.h>
-#include <asm/pgtable.h>
-
+// #include <asm/pgtable.h>
 #include "image.h"
 
 /* .exit.text needed in case of alternative patching */

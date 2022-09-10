@@ -942,4 +942,14 @@ config XILINX_XADC
 	  The driver can also be build as a module. If so, the module will be called
 	  xilinx-xadc.
 
+config MTKDTV_SARADC
+	tristate "MTKDTV SARADC driver"
+	default y
+	help
+	  Say yes here to build support for the SARADC found in SoCs from
+	  Rockchip.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called mtkdtv_saradc.
+
 endmenu

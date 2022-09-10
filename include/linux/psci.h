@@ -19,6 +19,7 @@
 
 #define PSCI_POWER_STATE_TYPE_STANDBY		0
 #define PSCI_POWER_STATE_TYPE_POWER_DOWN	1
+#define PSCI_RET_EOPNOTSUPP            -1
 
 bool psci_tos_resident_on(int cpu);
 
@@ -51,6 +52,7 @@ struct psci_operations {
 
 extern struct psci_operations psci_ops;
 
+void __init psci_arm32_init(void);
 #if defined(CONFIG_ARM_PSCI_FW)
 int __init psci_dt_init(void);
 #else

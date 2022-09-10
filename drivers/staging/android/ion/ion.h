@@ -1,9 +1,9 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
+/* SPDX-License-Identifier: GPL-2.0
+ *
  * drivers/staging/android/ion/ion.h
  *
  * Copyright (C) 2011 Google, Inc.
- */
+*/
 
 #ifndef _ION_H
 #define _ION_H
@@ -76,6 +76,9 @@ struct ion_buffer {
 	void *vaddr;
 	struct sg_table *sg_table;
 	struct list_head attachments;
+#ifdef CONFIG_MSTAR_CHIP
+	size_t start;
+#endif
 };
 
 void ion_buffer_destroy(struct ion_buffer *buffer);
@@ -98,6 +101,36 @@ struct ion_device {
 };
 
 /**
+ * struct ion_client - a process/hw block local address space
+ * @node:		node in the tree of all clients
+ * @dev:		backpointer to ion device
+ * @handles:		an rb tree of all the handles in this client
+ * @idr:		an idr space for allocating handle ids
+ * @lock:		lock protecting the tree of handles
+ * @name:		used for debugging
+ * @display_name:	used for debugging (unique version of @name)
+ * @display_serial:	used for debugging (to make display_name unique)
+ * @task:		used for debugging
+ *
+ * A client represents a list of buffers this client may access.
+ * The mutex stored here is used to protect both handles tree
+ * as well as the handles themselves, and should be held while modifying either.
+ */
+struct ion_client {
+	struct rb_node node;
+	struct ion_device *dev;
+	struct rb_root handles;
+	struct idr idr;
+	struct mutex lock;
+	const char *name;
+	char *display_name;
+	int display_serial;
+	struct task_struct *task;
+	pid_t pid;
+	struct dentry *debug_root;
+};
+
+/**
  * struct ion_heap_ops - ops to operate on a given heap
  * @allocate:		allocate memory
  * @free:		free memory
@@ -117,11 +150,18 @@ struct ion_heap_ops {
 			struct ion_buffer *buffer, unsigned long len,
 			unsigned long flags);
 	void (*free)(struct ion_buffer *buffer);
+#if defined(CONFIG_PLAT_MSTAR)
+	int (*phys)(struct ion_heap *heap, struct ion_buffer *buffer,
+			phys_addr_t *addr, size_t *len);
+#endif
 	void * (*map_kernel)(struct ion_heap *heap, struct ion_buffer *buffer);
 	void (*unmap_kernel)(struct ion_heap *heap, struct ion_buffer *buffer);
 	int (*map_user)(struct ion_heap *mapper, struct ion_buffer *buffer,
 			struct vm_area_struct *vma);
 	int (*shrink)(struct ion_heap *heap, gfp_t gfp_mask, int nr_to_scan);
+#ifdef CONFIG_MP_CMA_PATCH_CMA_MSTAR_DRIVER_BUFFER
+	struct device * (*get_dev)(struct ion_heap *heap);
+#endif
 };
 
 /**
@@ -179,9 +219,11 @@ struct ion_heap {
 	spinlock_t free_lock;
 	wait_queue_head_t waitqueue;
 	struct task_struct *task;
-
 	int (*debug_show)(struct ion_heap *heap, struct seq_file *s,
 			  void *unused);
+#if defined(CONFIG_MSTAR_CMAPOOL) && defined(CONFIG_MP_CMA_PATCH_CMA_MSTAR_DRIVER_BUFFER)
+	unsigned int mst_hid;
+#endif
 };
 
 /**
@@ -313,7 +355,11 @@ struct ion_page_pool {
 
 struct ion_page_pool *ion_page_pool_create(gfp_t gfp_mask, unsigned int order);
 void ion_page_pool_destroy(struct ion_page_pool *pool);
+#if CONFIG_MP_MMA_UMA_WITH_NARROW
+struct page *ion_page_pool_alloc(struct ion_page_pool *pool,unsigned long flags, bool new);
+#else
 struct page *ion_page_pool_alloc(struct ion_page_pool *pool);
+#endif
 void ion_page_pool_free(struct ion_page_pool *pool, struct page *page);
 
 #ifdef CONFIG_ION_SYSTEM_HEAP
@@ -336,6 +382,38 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 
 int ion_query_heaps(struct ion_heap_query *query);
 
+#if (MP_ION_PATCH_MSTAR == 1)
+unsigned long ion_get_cma_buffer_info(int share_fd);
+#endif
+
+#ifdef CONFIG_MSTAR_CMAPOOL
+#ifdef CONFIG_MP_CMA_PATCH_CMA_MSTAR_DRIVER_BUFFER
+/**
+ * ion_get_heap_dev() - get the cma device of the specified cma heap id
+ * @client:>            the client
+ * @heap_id_mask:     cma heap id
+ *
+ * get cma device of the specified cma heap id
+ */
+struct device * ion_get_heap_dev(struct ion_client *client, unsigned int heap_id_mask);
+#endif
+#endif
+
+#ifdef CONFIG_MP_MMA_ENABLE
+void ion_set_buffer_cached(struct dma_buf* dmabuf, bool cached);
+#endif
+
+/*
+ * struct ion_platform_data - array of platform heaps passed from board file
+ * @nr:         number of structures in the array
+ * @heaps:      array of platform_heap structions
+ *
+ * Provided by the board file in the form of platform data to a platform device.
+ */
+struct ion_platform_data {
+	int nr;
+	struct ion_platform_heap *heaps;
+};
 #ifdef CONFIG_ION_MODULE
 int ion_add_cma_heaps(void);
 int ion_system_heap_create(void);

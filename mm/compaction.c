@@ -24,6 +24,13 @@
 #include <linux/page_owner.h>
 #include <linux/psi.h>
 #include "internal.h"
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+#include <linux/ksm.h>
+#endif
+
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+void show_page_trace(unsigned long pfn);
+#endif
 
 #ifdef CONFIG_COMPACTION
 static inline void count_compact_event(enum vm_event_item item)
@@ -959,6 +966,115 @@ isolate_fail:
 	return low_pfn;
 }
 
+#ifdef CONFIG_MP_ION_PATCH_MSTAR
+/*
+ * Based on information in the current compact_control, find blocks
+ * suitable for isolating free pages from and then isolate them.
+ */
+int isolate_descrete_freepages(struct compact_control *cc,
+								struct cmaisolate_control *cmac)
+{
+	struct page *page;
+	struct zone *zone = cc->zone;
+	unsigned long high_pfn, low_pfn, pfn,block_end_pfn;
+	//unsigned long flags;
+	int nr_freepages = 0;//cc->nr_freepages;
+	//struct list_head *freelist = &cc->freepages;
+
+	if(cmac->target_count <= 0)
+		return 0;
+
+	/*
+	 * Initialise the free scanner. The starting point is where we last
+	 * scanned from (or the end of the zone if starting). The low point
+	 * is the end of the pageblock the migration scanner is using.
+	 */
+
+	pfn = cmac->end_pfn-1;
+	low_pfn = cmac->start_pfn;
+
+	pfn &= ~(pageblock_nr_pages-1);
+	low_pfn &=~(pageblock_nr_pages-1);
+
+	/*
+	 * Take care that if the migration scanner is at the end of the zone
+	 * that the free scanner does not accidentally move to the next zone
+	 * in the next isolation cycle.
+	 */
+	high_pfn = min(low_pfn, pfn);
+
+	BUG_ON(!list_empty(cmac->freelist));
+
+	/*
+	 * Isolate free pages until enough are available to migrate the
+	 * pages on cc->migratepages. We stop searching if the migrate
+	 * and free page scanners meet or enough free pages are isolated.
+	 */
+	for (; pfn >= low_pfn && nr_freepages < cmac->target_count;
+					pfn -= pageblock_nr_pages) {
+		unsigned long isolated;
+		LIST_HEAD(isolated_list);
+
+		if (!pfn_valid(pfn))
+			continue;
+
+		/*
+		 * Check for overlapping nodes/zones. It's possible on some
+		 * configurations to have a setup like
+		 * node0 node1 node0
+		 * i.e. it's possible that all pages within a zones range of
+		 * pages do not belong to a single zone.
+		 */
+		page = pfn_to_page(pfn);
+		if (page_zone(page) != zone)
+			continue;
+		/*
+		 * Found a block suitable for isolating free pages from. Now
+		 * we disabled interrupts, double check things are ok and
+		 * isolate the pages. This is to minimise the time IRQs
+		 * are disabled
+		 */
+		isolated = 0;
+
+		block_end_pfn = ALIGN(pfn + 1, pageblock_nr_pages);
+		block_end_pfn = min(block_end_pfn, cmac->end_pfn);
+
+		//spin_lock_irqsave(&zone->lock, flags);
+		//printk("cc->zone=%x, zone=%x,[%x,%x] \n",cc->zone,zone,pfn,block_end_pfn);
+		//isolated = isolate_freepages_block(cc, pfn,block_end_pfn, &isolated_list,true);
+		isolated = isolate_freepages_block(cc, pfn,block_end_pfn, &isolated_list,true);
+		//printk(KERN_ERR "    ****** isolate_freepages_block %x-%x-%x,isolated=%d\n", low_pfn,pfn,block_end_pfn,isolated);
+
+		//spin_unlock_irqrestore(&zone->lock, flags);
+
+		/*
+		 * Record the highest PFN we isolated pages from. When next
+		 * looking for free pages, the search will restart here as
+		 * page migration may have returned some pages to the allocator
+		 */
+		//if (isolated)
+		{
+			high_pfn = max(high_pfn, pfn);
+			list_splice(&isolated_list, cmac->freelist);
+			nr_freepages += isolated;
+		}
+
+	}
+
+
+	/* split_free_page does not map the pages */
+	list_for_each_entry(page, cmac->freelist, lru) {
+		arch_alloc_page(page, 0);
+		kernel_map_pages(page, 1, 1);
+	}
+
+	//*(cmac->last_end_pfn) = high_pfn;
+	//if(nr_freepages ==0)
+		//printk(KERN_ERR "<<<========>start_pfn %x end %x\n", start_pfn, end_pfn);
+	return nr_freepages;
+}
+#endif
+
 /**
  * isolate_migratepages_range() - isolate migrate-able pages in a PFN range
  * @cc:        Compaction control structure.
@@ -1171,6 +1287,10 @@ static struct page *compaction_alloc(struct page *migratepage,
 {
 	struct compact_control *cc = (struct compact_control *)data;
 	struct page *freepage;
+#ifdef CONFIG_MP_CMA_PATCH_MIGRATION_FILTER
+	struct address_space *mapping = NULL;
+#endif
+	// migratepage is the page need to be migrated @ migrate_list(List of pages being migrated)
 
 	/*
 	 * Isolate free pages if necessary, and if we are not aborting due to
@@ -1185,8 +1305,44 @@ static struct page *compaction_alloc(struct page *migratepage,
 	}
 
 	freepage = list_entry(cc->freepages.next, struct page, lru);
+
+#ifdef CONFIG_MP_CMA_PATCH_MIGRATION_FILTER
+	/*
+	 * 1. find_or_create_page in grow_dev_page can not use movable flag
+	 * 2. compaction migrate bdev buffer page to cma area is not allowed
+	 * 3. fix cma migration failure problem by filtting out bdev buffer page in cma area
+	 */
+	if(is_cma_page(freepage)) {
+		if((mapping = page_mapping(migratepage))) {
+			if(!(mapping_gfp_mask(mapping) & __GFP_MOVABLE)) {
+				return migratepage;
+			}
+		} else {
+			return migratepage;
+		}
+	}
+#endif
+
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+	if (unlikely(PageKsm(migratepage)))
+		if(is_cma_page(freepage))
+			return migratepage;//failed for migration
+#endif
+
 	list_del(&freepage->lru);
 	cc->nr_freepages--;
+
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+	if((mapping = page_mapping(migratepage)))
+	{
+		if(!(mapping_gfp_mask(mapping) & __GFP_MOVABLE) && is_cma_page(freepage))
+		{
+			printk(KERN_ERR "serious warning: unmovable page occurs in cma area\n");
+			show_page_trace(page_to_pfn(migratepage));
+		}
+	}
+	notify_alloc_page(freepage, 1, mapping? mapping_gfp_mask(mapping) : 0);
+#endif
 
 	return freepage;
 }
@@ -1202,6 +1358,10 @@ static void compaction_free(struct page *page, unsigned long data)
 
 	list_add(&page->lru, &cc->freepages);
 	cc->nr_freepages++;
+
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+	notify_free_page(page, 1);
+#endif
 }
 
 /* possible outcome of isolate_migratepages */

@@ -21,6 +21,7 @@
 #ifdef CONFIG_NEED_MACH_MEMORY_H
 #include <mach/memory.h>
 #endif
+#include <asm/kasan_def.h>
 
 /* PAGE_OFFSET - the virtual address of the start of the kernel image */
 #define PAGE_OFFSET		UL(CONFIG_PAGE_OFFSET)
@@ -31,7 +32,11 @@
  * TASK_SIZE - the maximum size of a user space task.
  * TASK_UNMAPPED_BASE - the lower boundary of the mmap VM area
  */
+#ifndef CONFIG_KASAN
 #define TASK_SIZE		(UL(CONFIG_PAGE_OFFSET) - UL(SZ_16M))
+#else
+#define TASK_SIZE		(KASAN_SHADOW_START)
+#endif
 #define TASK_UNMAPPED_BASE	ALIGN(TASK_SIZE / 3, SZ_16M)
 
 /*
@@ -141,7 +146,9 @@ extern unsigned long vectors_base;
  * have CONFIG_ARM_PATCH_PHYS_VIRT. Assembly code must always use
  * PLAT_PHYS_OFFSET and not PHYS_OFFSET.
  */
+#if !defined(CONFIG_PLAT_MSTAR) && !defined(PLAT_PHYS_OFFSET)
 #define PLAT_PHYS_OFFSET	UL(CONFIG_PHYS_OFFSET)
+#endif
 
 #ifdef CONFIG_XIP_KERNEL
 /*
@@ -228,6 +235,7 @@ static inline phys_addr_t __virt_to_phys_nodebug(unsigned long x)
 	return t;
 }
 
+#if !defined(CONFIG_PLAT_MSTAR)
 static inline unsigned long __phys_to_virt(phys_addr_t x)
 {
 	unsigned long t;
@@ -241,10 +249,13 @@ static inline unsigned long __phys_to_virt(phys_addr_t x)
 	__pv_stub((unsigned long) x, t, "sub", __PV_BITS_31_24);
 	return t;
 }
+#endif
 
 #else
 
+#if !defined(CONFIG_PLAT_MSTAR) && !defined(PHYS_OFFSET)
 #define PHYS_OFFSET	PLAT_PHYS_OFFSET
+#endif
 #define PHYS_PFN_OFFSET	((unsigned long)(PHYS_OFFSET >> PAGE_SHIFT))
 
 static inline phys_addr_t __virt_to_phys_nodebug(unsigned long x)
@@ -252,25 +263,35 @@ static inline phys_addr_t __virt_to_phys_nodebug(unsigned long x)
 	return (phys_addr_t)x - PAGE_OFFSET + PHYS_OFFSET;
 }
 
+#if !defined(CONFIG_PLAT_MSTAR)
 static inline unsigned long __phys_to_virt(phys_addr_t x)
 {
 	return x - PHYS_OFFSET + PAGE_OFFSET;
 }
+#endif
 
 #endif
 
+#if !defined(CONFIG_PLAT_MSTAR)
 #define virt_to_pfn(kaddr) \
 	((((unsigned long)(kaddr) - PAGE_OFFSET) >> PAGE_SHIFT) + \
 	 PHYS_PFN_OFFSET)
+#else
+#define virt_to_pfn(kaddr)	(__pa(kaddr) >> PAGE_SHIFT)
+#endif
 
 #define __pa_symbol_nodebug(x)	__virt_to_phys_nodebug((x))
 
+#if !defined(CONFIG_PLAT_MSTAR)
 #ifdef CONFIG_DEBUG_VIRTUAL
 extern phys_addr_t __virt_to_phys(unsigned long x);
 extern phys_addr_t __phys_addr_symbol(unsigned long x);
 #else
 #define __virt_to_phys(x)	__virt_to_phys_nodebug(x)
 #define __phys_addr_symbol(x)	__pa_symbol_nodebug(x)
+#endif
+#else
+#define __phys_addr_symbol(x)   __virt_to_phys(x)
 #endif
 
 /*

@@ -86,6 +86,10 @@ struct task_group;
 #define TASK_NEW			0x0800
 #define TASK_STATE_MAX			0x1000
 
+#ifdef CONFIG_MSTAR_CHIP
+#define TASK_STATE_TO_CHAR_STR "RSDTtXZxKWPNn"
+#endif
+
 /* Convenience macros for the sake of set_current_state: */
 #define TASK_KILLABLE			(TASK_WAKEKILL | TASK_UNINTERRUPTIBLE)
 #define TASK_STOPPED			(TASK_WAKEKILL | __TASK_STOPPED)
@@ -1051,6 +1055,9 @@ struct task_struct {
 	seqcount_t			mems_allowed_seq;
 	int				cpuset_mem_spread_rotor;
 	int				cpuset_slab_spread_rotor;
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+	int				memalloc_idx;
+#endif
 #endif
 #ifdef CONFIG_CGROUPS
 	/* Control Group info protected by css_set_lock: */
@@ -1456,6 +1463,9 @@ extern struct pid *cad_pid;
 /*
  * Per process flags
  */
+#ifdef CONFIG_MP_RESERVED_VMA_PATCH_FOR_DFB
+#define PF_MAPPED_DFB		0x00000001      /* I have mapped DFB to my vma*/
+#endif
 #define PF_IDLE			0x00000002	/* I am an IDLE thread */
 #define PF_EXITING		0x00000004	/* Getting shut down */
 #define PF_EXITPIDONE		0x00000008	/* PI exit done on shut down */
@@ -1485,6 +1495,9 @@ extern struct pid *cad_pid;
 #define PF_MUTEX_TESTER		0x20000000	/* Thread belongs to the rt mutex tester */
 #define PF_FREEZER_SKIP		0x40000000	/* Freezer should not count it as freezable */
 #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
+#ifdef CONFIG_MP_MSTAR_STR_PROCESS_FREEZE_LATE
+#define PF_FREEZE_LATE		0x100000000	/* Threads to be frozen along with kernel threads */
+#endif
 
 /*
  * Only the _current_ task can read/write to tsk->flags, but other
@@ -1590,6 +1603,15 @@ static inline int set_cpus_allowed_ptr(struct task_struct *p, const struct cpuma
 {
 	if (!cpumask_test_cpu(0, new_mask))
 		return -EINVAL;
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+static inline int set_memalloc_idx(struct task_struct *p,
+				       int val)
+{
+	p->memalloc_idx = val;
 	return 0;
 }
 #endif

@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
+ifeq ($(CONFIG_MP_PLATFORM_ARM),y)
+EXTRA_CFLAGS      +=  -Idrivers/mstar2/include
+endif
 obj-$(CONFIG_IRQCHIP)			+= irqchip.o
 
 obj-$(CONFIG_ALPINE_MSI)		+= irq-alpine-msi.o
@@ -88,3 +91,4 @@ obj-$(CONFIG_GOLDFISH_PIC) 		+= irq-goldfish-pic.o
 obj-$(CONFIG_NDS32)			+= irq-ativic32.o
 obj-$(CONFIG_QCOM_PDC)			+= qcom-pdc.o
 obj-$(CONFIG_SIFIVE_PLIC)		+= irq-sifive-plic.o
+obj-$(CONFIG_MSTAR_CHIP)		+= irq-mtk-dtv.o

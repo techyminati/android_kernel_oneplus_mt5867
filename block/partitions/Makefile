@@ -8,8 +8,13 @@ obj-$(CONFIG_BLOCK) := check.o
 obj-$(CONFIG_ACORN_PARTITION) += acorn.o
 obj-$(CONFIG_AMIGA_PARTITION) += amiga.o
 obj-$(CONFIG_ATARI_PARTITION) += atari.o
+#ifdef CONFIG_MSTAR_CHIP
+obj-$(CONFIG_EMMC_PARTITION) += emmc.o
+obj-$(CONFIG_UFS_PARTITION) += part_ufs.o
+#else
 obj-$(CONFIG_AIX_PARTITION) += aix.o
 obj-$(CONFIG_CMDLINE_PARTITION) += cmdline.o
+#endif
 obj-$(CONFIG_MAC_PARTITION) += mac.o
 obj-$(CONFIG_LDM_PARTITION) += ldm.o
 obj-$(CONFIG_MSDOS_PARTITION) += msdos.o

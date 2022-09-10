@@ -870,6 +870,7 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 		break;
 
 	case HID_UP_CONSUMER:	/* USB HUT v1.12, pages 75-84 */
+		set_bit(EV_REP, input->evbit);
 		switch (usage->hid & HID_USAGE) {
 		case 0x000: goto ignore;
 		case 0x030: map_key_clear(KEY_POWER);		break;
@@ -956,7 +957,8 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 		case 0x0e5: map_key_clear(KEY_BASSBOOST);	break;
 		case 0x0e9: map_key_clear(KEY_VOLUMEUP);	break;
 		case 0x0ea: map_key_clear(KEY_VOLUMEDOWN);	break;
-		case 0x0f5: map_key_clear(KEY_SLOW);		break;
+		case 0x0ec: map_key_clear(KEY_POUND);           break;
+                case 0x0f5: map_key_clear(KEY_SLOW);		break;
 
 		case 0x181: map_key_clear(KEY_BUTTONCONFIG);	break;
 		case 0x182: map_key_clear(KEY_BOOKMARKS);	break;
@@ -1042,6 +1044,7 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 		case 0x2cc: map_key_clear(KEY_KBDINPUTASSIST_CANCEL);	break;
 
 		case 0x29f: map_key_clear(KEY_SCALE);		break;
+		case 0x0a3: map_key_clear(KEY_FN_F1);	break;
 
 		default: map_key_clear(KEY_UNKNOWN);
 		}
@@ -1125,6 +1128,10 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 	}
 
 mapped:
+	/* Mapping failed, bail out */
+	if (!bit)
+		return;
+
 	if (device->driver->input_mapped &&
 	    device->driver->input_mapped(device, hidinput, field, usage,
 					 &bit, &max) < 0) {

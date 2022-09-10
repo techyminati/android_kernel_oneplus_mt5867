@@ -19,6 +19,13 @@
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 
+#ifndef MP_USB_MSTAR
+#include <mstar/mpatch_macro.h>
+#endif
+
+#if (MP_USB_MSTAR==1)
+#include "../host/ehci-mstar.h"
+#endif
 
 /*
  * DMA-Coherent Buffers
@@ -31,6 +38,9 @@ static size_t pool_max[HCD_BUFFER_POOLS] = {
 
 void __init usb_init_pool_max(void)
 {
+#if (MP_USB_MSTAR==1) && (_USB_128_ALIGMENT)
+	pool_max[0] = 0;	/* Don't use this pool */
+#else
 	/*
 	 * The pool_max values must never be smaller than
 	 * ARCH_KMALLOC_MINALIGN.
@@ -43,6 +53,7 @@ void __init usb_init_pool_max(void)
 		pool_max[0] = 0;	/* Don't use this pool */
 	else
 		BUILD_BUG();		/* We don't allow this */
+#endif
 }
 
 /* SETUP primitives */

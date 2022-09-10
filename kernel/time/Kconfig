@@ -125,6 +125,7 @@ config HIGH_RES_TIMERS
 	bool "High Resolution Timer Support"
 	depends on !ARCH_USES_GETTIMEOFFSET && GENERIC_CLOCKEVENTS
 	select TICK_ONESHOT
+	select MP_HRT_TIMER_ENABLE
 	help
 	  This option enables high resolution timer support. If your
 	  hardware is not capable then this option only increases

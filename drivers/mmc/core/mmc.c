@@ -19,6 +19,9 @@
 #include <linux/mmc/host.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/mmc.h>
+#ifdef CONFIG_MSTAR_CHIP
+#include <linux/kthread.h>
+#endif
 
 #include "core.h"
 #include "card.h"
@@ -454,7 +457,11 @@ static int mmc_decode_ext_csd(struct mmc_card *card, u8 *ext_csd)
 				part_size = ext_csd[EXT_CSD_BOOT_MULT] << 17;
 				mmc_part_add(card, part_size,
 					EXT_CSD_PART_CONFIG_ACC_BOOT0 + idx,
+#ifdef CONFIG_MSTAR_CHIP
+					"boot%d", idx, false,
+#else
 					"boot%d", idx, true,
+#endif
 					MMC_BLK_DATA_AREA_BOOT);
 			}
 		}
@@ -597,6 +604,8 @@ static int mmc_decode_ext_csd(struct mmc_card *card, u8 *ext_csd)
 			ext_csd[EXT_CSD_CACHE_SIZE + 1] << 8 |
 			ext_csd[EXT_CSD_CACHE_SIZE + 2] << 16 |
 			ext_csd[EXT_CSD_CACHE_SIZE + 3] << 24;
+
+        card->ext_csd.cache_policy = ext_csd[EXT_CSD_CACHE_POLICY];
 
 		if (ext_csd[EXT_CSD_DATA_SECTOR_SIZE] == 1)
 			card->ext_csd.data_sector_size = 4096;
@@ -1796,7 +1805,8 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	 * sudden power failure tests. Let's extend the timeout to a minimum of
 	 * DEFAULT_CACHE_EN_TIMEOUT_MS and do it for all cards.
 	 */
-	if (card->ext_csd.cache_size > 0) {
+    if ((card->ext_csd.cache_size > 0) &&
+        (card->ext_csd.cache_policy & 1)) {
 		unsigned int timeout_ms = MIN_CACHE_EN_TIMEOUT_MS;
 
 		timeout_ms = max(card->ext_csd.generic_cmd6_time, timeout_ms);
@@ -1817,6 +1827,7 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 			card->ext_csd.cache_ctrl = 1;
 		}
 	}
+
 
 	/*
 	 * Enable Command Queue if supported. Note that Packed Commands cannot
@@ -2100,11 +2111,41 @@ static int mmc_shutdown(struct mmc_host *host)
 	return err;
 }
 
+#ifdef CONFIG_MSTAR_CHIP
+/*
+ * Create mmc resume thread for str performance,
+ * it should be OK since mmc resume use runtime method,
+ * which means resume anytime
+*/
+static int mmc_resume_thread(void *data)
+{
+	int err;
+	struct mmc_host *host = (struct mmc_host *)data;
+
+	err = _mmc_resume(host);
+	if (err && err != -ENOMEDIUM)
+		pr_err("%s: error %d doing resume\n",
+			mmc_hostname(host), err);
+
+	return 0;
+}
+#endif
+
 /*
  * Callback for resume.
  */
 static int mmc_resume(struct mmc_host *host)
 {
+#ifdef CONFIG_MSTAR_CHIP
+	struct task_struct *t;
+
+	t = kthread_run(mmc_resume_thread, (void *)host,
+				"mmc_core_resume");
+	if (IS_ERR(t)) {
+		pr_err("Create mmc_resume_thread failed!\n");
+		return PTR_ERR(t);
+	}
+#endif
 	pm_runtime_enable(&host->card->dev);
 	return 0;
 }
@@ -2133,6 +2174,11 @@ static int mmc_runtime_suspend(struct mmc_host *host)
 static int mmc_runtime_resume(struct mmc_host *host)
 {
 	int err;
+
+#ifdef CONFIG_MSTAR_CHIP
+	if (!(host->caps & MMC_CAP_RUNTIME_RESUME))
+		return 0;
+#endif
 
 	err = _mmc_resume(host);
 	if (err && err != -ENOMEDIUM)

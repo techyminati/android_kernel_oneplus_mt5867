@@ -85,6 +85,10 @@ ENTRY(stext)
  THUMB(	.thumb			)	@ switch to Thumb now.
  THUMB(1:			)
 
+#ifdef CONFIG_MSTAR_ARM_BD_FPGA
+        ldr   r1, =~0
+#endif
+
 #ifdef CONFIG_ARM_VIRT_EXT
 	bl	__hyp_stub_install
 #endif
@@ -417,6 +421,19 @@ ENDPROC(secondary_startup_arm)
 	 */
 ENTRY(__secondary_switched)
 	ldr	sp, [r7, #12]			@ get secondary_data.stack
+#ifdef CONFIG_MP_IRQ_STACK
+	push	{r4, r5}
+	mrc	p15, 0, r4, c0, c0, 5
+#ifdef CONFIG_MP_IRQ_STACK_WITH_FCM
+	lsr	r4, r4, #8
+#endif
+	and	r4, r4, #0xff
+	ldr	r5, =sp_mtk
+	add	r5, r5, r4, lsl #2
+	mov	r4, sp
+	str	r4, [r5]
+	pop	{r4, r5}
+#endif
 	mov	fp, #0
 	b	secondary_start_kernel
 ENDPROC(__secondary_switched)
@@ -731,4 +748,14 @@ __pv_offset:
 	.size	__pv_offset, . -__pv_offset
 #endif
 
+#ifdef CONFIG_MP_IRQ_STACK
+	.align
+	.section .data
+	.global sp_mtk
+	sp_mtk:
+	.word	0
+	.word	0
+	.word	0
+	.word	0
+#endif
 #include "head-common.S"

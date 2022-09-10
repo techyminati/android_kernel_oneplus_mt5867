@@ -22,6 +22,14 @@
 #include	"xhci-ext-caps.h"
 #include "pci-quirks.h"
 
+#ifndef MP_USB_MSTAR
+#include <mstar/mpatch_macro.h>
+#endif
+
+#if (MP_USB_MSTAR==1)
+#include "xhci-mstar.h"
+#endif
+
 /* xHCI PCI Configuration Registers */
 #define XHCI_SBRN_OFFSET	(0x60)
 
@@ -940,6 +948,9 @@ struct xhci_virt_ep {
 	struct list_head	cancelled_td_list;
 	/* Watchdog timer for stop endpoint command to cancel URBs */
 	struct timer_list	stop_cmd_timer;
+#if defined(CONFIG_SUSPEND) && defined(CONFIG_MP_USB_STR_PATCH)
+	unsigned int		stop_cmd_timer_count;
+#endif /* CONFIG_MP_USB_STR_PATCH */
 	struct xhci_hcd		*xhci;
 	/* Dequeue pointer and dequeue segment for a submitted Set TR Dequeue
 	 * command.  We'll need to update the ring's dequeue segment and dequeue
@@ -1539,7 +1550,11 @@ struct xhci_td {
 };
 
 /* xHCI command default timeout value */
+#if (MP_USB_MSTAR==1)
+#define XHCI_CMD_DEFAULT_TIMEOUT	(10 * HZ)
+#else
 #define XHCI_CMD_DEFAULT_TIMEOUT	(5 * HZ)
+#endif
 
 /* command descriptor */
 struct xhci_cd {
@@ -2064,6 +2079,13 @@ void xhci_free_container_ctx(struct xhci_hcd *xhci,
 int xhci_sec_event_ring_setup(struct usb_hcd *hcd, unsigned int intr_num);
 int xhci_sec_event_ring_cleanup(struct usb_hcd *hcd, unsigned int intr_num);
 
+#if (MP_USB_MSTAR==1) \
+	|| defined(CONFIG_USB_XHCI_PLATFORM) \
+	|| defined(CONFIG_USB_XHCI_PLATFORM_MODULE)
+int xhci_register_plat(void);
+void xhci_unregister_plat(void);
+#endif
+
 /* xHCI host controller glue */
 typedef void (*xhci_get_quirks_t)(struct device *, struct xhci_hcd *);
 int xhci_handshake(void __iomem *ptr, u32 mask, u32 done, int usec);
@@ -2101,6 +2123,11 @@ int xhci_queue_slot_control(struct xhci_hcd *xhci, struct xhci_command *cmd,
 		u32 trb_type, u32 slot_id);
 int xhci_queue_address_device(struct xhci_hcd *xhci, struct xhci_command *cmd,
 		dma_addr_t in_ctx_ptr, u32 slot_id, enum xhci_setup_dev);
+#if (MP_USB_MSTAR==1)
+int xhci_queue_address_device_BSR(struct xhci_hcd *xhci,
+        struct xhci_command *cmd,dma_addr_t in_ctx_ptr, u32 slot_id);
+void xhci_set_hc_event_deq(struct xhci_hcd *xhci);
+#endif
 int xhci_queue_vendor_command(struct xhci_hcd *xhci, struct xhci_command *cmd,
 		u32 field1, u32 field2, u32 field3, u32 field4);
 int xhci_queue_stop_endpoint(struct xhci_hcd *xhci, struct xhci_command *cmd,

@@ -27,6 +27,9 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include "input-compat.h"
+#if defined(CONFIG_EVDEV_MISC) || defined(CONFIG_EVDEV_MISC_MODULE)
+extern unsigned long input_dev_event_enable;
+#endif
 
 struct evdev {
 	int open;
@@ -301,12 +304,14 @@ static void evdev_events(struct input_handle *handle,
 	rcu_read_lock();
 
 	client = rcu_dereference(evdev->grab);
-
-	if (client)
-		evdev_pass_values(client, vals, count, ev_time);
-	else
-		list_for_each_entry_rcu(client, &evdev->client_list, node)
-			evdev_pass_values(client, vals, count, ev_time);
+#if defined(CONFIG_EVDEV_MISC) || defined(CONFIG_EVDEV_MISC_MODULE)
+    if(input_dev_event_enable)
+#endif
+        if (client)
+            evdev_pass_values(client, vals, count, ev_time);
+        else
+		    list_for_each_entry_rcu(client, &evdev->client_list, node)
+			    evdev_pass_values(client, vals, count, ev_time);
 
 	rcu_read_unlock();
 }

@@ -19,6 +19,9 @@
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 #include <linux/sync_file.h>
+#ifndef CONFIG_DEBUG_FS
+#include <linux/miscdevice.h>
+#endif
 
 #include "sync_debug.h"
 
@@ -413,9 +416,31 @@ static long sw_sync_ioctl(struct file *file, unsigned int cmd,
 	}
 }
 
+#ifndef CONFIG_DEBUG_FS
+static const struct file_operations sw_sync_fops = {
+	.owner = THIS_MODULE,
+	.open = sw_sync_debugfs_open,
+	.release = sw_sync_debugfs_release,
+	.unlocked_ioctl = sw_sync_ioctl,
+	.compat_ioctl = sw_sync_ioctl,
+};
+
+static struct miscdevice sw_sync_dev = {
+	.minor	= MISC_DYNAMIC_MINOR,
+	.name	= "sw_sync",
+	.fops	= &sw_sync_fops,
+};
+
+static int __init sw_sync_device_init(void)
+{
+	return misc_register(&sw_sync_dev);
+}
+device_initcall(sw_sync_device_init);
+#else
 const struct file_operations sw_sync_debugfs_fops = {
 	.open           = sw_sync_debugfs_open,
 	.release        = sw_sync_debugfs_release,
 	.unlocked_ioctl = sw_sync_ioctl,
 	.compat_ioctl	= sw_sync_ioctl,
 };
+#endif

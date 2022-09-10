@@ -594,6 +594,17 @@ struct crypto_tfm {
 
 	u32 crt_flags;
 	
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	int is_mzc;
+#endif
+#ifdef CONFIG_MP_MZCCMDQ_HW_SPLIT
+    unsigned long addr1;
+    unsigned long addr2;
+#endif
+#ifdef CONFIG_MP_ZSM
+	u32 crc32;
+#endif
+	
 	union {
 		struct ablkcipher_tfm ablkcipher;
 		struct blkcipher_tfm blkcipher;

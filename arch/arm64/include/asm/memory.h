@@ -28,6 +28,10 @@
 #include <asm/page-def.h>
 #include <asm/sizes.h>
 
+#ifdef CONFIG_NEED_MACH_MEMORY_H
+#include <mach/memory.h>
+#endif
+
 /*
  * Size of the PCI I/O space. This must remain a power of two so that
  * IO_SPACE_LIMIT acts as a mask for the low bits of I/O addresses.
@@ -68,6 +72,7 @@
 #define VMEMMAP_START		(PAGE_OFFSET - VMEMMAP_SIZE)
 #define PCI_IO_END		(VMEMMAP_START - SZ_2M)
 #define PCI_IO_START		(PCI_IO_END - PCI_IO_SIZE)
+#define EARLYCON_IOBASE         (MODULES_VADDR - SZ_4M)
 #define FIXADDR_TOP		(PCI_IO_START - SZ_2M)
 
 #define KERNEL_START      _text
@@ -182,7 +187,8 @@
 
 extern s64			memstart_addr;
 /* PHYS_OFFSET - the physical address of the start of memory. */
-#define PHYS_OFFSET		({ VM_BUG_ON(memstart_addr & 1); memstart_addr; })
+//#define PHYS_OFFSET		({ VM_BUG_ON(memstart_addr & 1); memstart_addr; })
+#define PHYS_OFFSET	        UL(CONFIG_MEMORY_START_ADDRESS)
 
 /* the virtual base of the kernel image (minus TEXT_OFFSET) */
 extern u64			kimage_vaddr;
@@ -266,6 +272,9 @@ static inline const void *__tag_set(const void *addr, u8 tag)
 
 #define __pa_symbol_nodebug(x)	__kimg_to_phys((phys_addr_t)(x))
 
+#if !defined(CONFIG_PLAT_MSTAR)
+
+/* use __virt_to_phys and __phys_to_virt defined in mach/memory.c */
 #ifdef CONFIG_DEBUG_VIRTUAL
 extern phys_addr_t __virt_to_phys(unsigned long x);
 extern phys_addr_t __phys_addr_symbol(unsigned long x);
@@ -276,6 +285,13 @@ extern phys_addr_t __phys_addr_symbol(unsigned long x);
 
 #define __phys_to_virt(x)	((unsigned long)((x) - PHYS_OFFSET) | PAGE_OFFSET)
 #define __phys_to_kimg(x)	((unsigned long)((x) + kimage_voffset))
+
+#else
+
+#define __phys_addr_symbol(x)	__pa_symbol_nodebug(x)
+#define __phys_to_kimg(x)	((unsigned long)((x) + kimage_voffset))
+
+#endif
 
 /*
  * Convert a page to/from a physical address
@@ -333,7 +349,8 @@ static inline void *phys_to_virt(phys_addr_t x)
  */
 #define ARCH_PFN_OFFSET		((unsigned long)PHYS_PFN_OFFSET)
 
-#ifndef CONFIG_SPARSEMEM_VMEMMAP
+//#ifndef CONFIG_SPARSEMEM_VMEMMAP
+#if 1
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
 #define _virt_addr_valid(kaddr)	pfn_valid(__pa(kaddr) >> PAGE_SHIFT)
 #else

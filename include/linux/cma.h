@@ -17,6 +17,42 @@
 
 #endif
 
+#if defined(CONFIG_MP_CMA_PATCH_CMA_MSTAR_DRIVER_BUFFER)
+#define CMA_HEAP_MIUOFFSET_NOCARE (-1UL)
+#endif
+
+#ifdef CONFIG_MP_CMA_PATCH_CMA_MSTAR_DRIVER_BUFFER
+#define CMA_HEAP_NAME_LENG  32
+
+struct CMA_BootArgs_Config {
+	int miu;
+	int heap_type;
+	int pool_id;
+	unsigned long start;  //for boot args this is miu offset
+	unsigned long size;
+	char name[CMA_HEAP_NAME_LENG];
+};
+#endif
+
+#ifdef CONFIG_MP_CMA_PATCH_CMA_MSTAR_DRIVER_BUFFER
+#include <linux/device.h>
+extern struct page *dma_alloc_at_from_contiguous(struct device *dev, int count,
+					unsigned int align, phys_addr_t at_addr);
+
+extern struct page *dma_alloc_from_contiguous_direct(struct device *dev, int count,
+					unsigned int align, long *retlen);
+
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+extern struct page * dma_alloc_from_fake_memory(struct device *dev, int count,
+					unsigned int align, long *retlen);
+extern bool dma_release_from_fake_memory(struct device *dev, const struct page *pages, unsigned int count);
+#endif
+#ifdef CONFIG_MP_MMA_CMA_ENABLE
+extern struct page *dma_alloc_at_from_contiguous_from_high_to_low(struct device *dev, int count,
+				       unsigned int order, phys_addr_t at_addr);
+#endif
+#endif
+
 struct cma;
 
 extern unsigned long totalcma_pages;

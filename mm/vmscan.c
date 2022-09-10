@@ -56,11 +56,81 @@
 
 #include <linux/swapops.h>
 #include <linux/balloon_compaction.h>
-
+#ifdef CONFIG_MP_MULTIPLE_KSWAPDS
+#include <uapi/linux/sched/types.h>
+#endif
 #include "internal.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/vmscan.h>
+
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+extern db_time_table time_cnt_table[DB_MAX_CNT];
+
+#define K(x) ((x) << (PAGE_SHIFT-10))
+static const char migrate_types[MIGRATE_TYPES] = {
+	[MIGRATE_UNMOVABLE] = 'U',
+	[MIGRATE_MOVABLE]   = 'M',
+	[MIGRATE_RECLAIMABLE]   = 'E',
+	[MIGRATE_HIGHATOMIC]   = 'H',
+#ifdef CONFIG_CMA
+	[MIGRATE_CMA]       = 'C',
+#endif
+#ifdef CONFIG_MEMORY_ISOLATION
+	[MIGRATE_ISOLATE]   = 'I',
+#endif
+};
+
+void show_freemem_info(void)
+{
+	struct zone *zone;
+	int show_cnt = 0;
+
+	for_each_populated_zone(zone) {
+		unsigned long nr[MAX_ORDER][MIGRATE_TYPES], flags, order, total = 0;
+		int type;
+		printk(CMA_ERR "ZONE %s: \n", zone->name);
+
+		memset(nr, 0, sizeof(nr));
+
+		spin_lock_irqsave(&zone->lock, flags);
+		for (order = 0; order < MAX_ORDER; order++) {
+			struct free_area *area = &zone->free_area[order];
+
+			for (type = 0; type < MIGRATE_TYPES; type++) {
+				struct list_head *head = area->free_list[type].next;
+				while(head != &area->free_list[type])
+				{
+					head = head->next;
+					nr[order][type]++;
+				}
+				total += (nr[order][type] << order);
+			}
+			//nr[order] = area->nr_free;
+		}
+		spin_unlock_irqrestore(&zone->lock, flags);
+
+		for (order = 0; order < MAX_ORDER; order++) {
+			show_cnt = 0;
+
+			for (type = 0; type < MIGRATE_TYPES; type++) {
+				if(nr[order][type])
+				{
+					printk(CMA_ERR "[%c]%lu*%lukB ", migrate_types[type],
+						nr[order][type], K(1UL) << order);
+					show_cnt = 1;
+				}
+			}
+
+			if(show_cnt)
+				printk(CMA_ERR "\n");
+		}
+
+		printk(CMA_ERR "\ntotal= %lukB free\n", K(total));
+		printk(CMA_ERR "%ld total pagecache pages\n\n", global_node_page_state(NR_FILE_PAGES));
+	}
+}
+#endif
 
 struct scan_control {
 	/* How many pages shrink_list() should reclaim */
@@ -448,6 +518,9 @@ EXPORT_SYMBOL(unregister_shrinker);
 static unsigned long do_shrink_slab(struct shrink_control *shrinkctl,
 				    struct shrinker *shrinker, int priority)
 {
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+	unsigned long time_start = jiffies;
+#endif
 	unsigned long freed = 0;
 	unsigned long long delta;
 	long total_scan;
@@ -463,8 +536,14 @@ static unsigned long do_shrink_slab(struct shrink_control *shrinkctl,
 		nid = 0;
 
 	freeable = shrinker->count_objects(shrinker, shrinkctl);
-	if (freeable == 0 || freeable == SHRINK_EMPTY)
+	if (freeable == 0 || freeable == SHRINK_EMPTY) {
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+		atomic_add((jiffies-time_start),
+			&time_cnt_table[shrink_slab_node_count].lone_time);
+		atomic_inc(&time_cnt_table[shrink_slab_node_count].do_cnt);
+#endif
 		return freeable;
+	}
 
 	/*
 	 * copy the current shrinker scan count into a local variable
@@ -563,6 +642,10 @@ static unsigned long do_shrink_slab(struct shrink_control *shrinkctl,
 		new_nr = atomic_long_read(&shrinker->nr_deferred[nid]);
 
 	trace_mm_shrink_slab_end(shrinker, nid, freed, nr, new_nr, total_scan);
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+	atomic_add((jiffies-time_start), &time_cnt_table[shrink_slab_node_count].lone_time);
+	atomic_inc(&time_cnt_table[shrink_slab_node_count].do_cnt);
+#endif
 	return freed;
 }
 
@@ -669,6 +752,9 @@ static unsigned long shrink_slab(gfp_t gfp_mask, int nid,
 				 int priority)
 {
 	unsigned long ret, freed = 0;
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+	unsigned long time_start = jiffies;
+#endif
 	struct shrinker *shrinker;
 
 	/*
@@ -709,6 +795,11 @@ static unsigned long shrink_slab(gfp_t gfp_mask, int nid,
 	up_read(&shrinker_rwsem);
 out:
 	cond_resched();
+
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+	atomic_add((jiffies-time_start), &time_cnt_table[shrink_slab_count].lone_time);
+	atomic_inc(&time_cnt_table[shrink_slab_count].do_cnt);
+#endif
 	return freed;
 }
 
@@ -1116,7 +1207,11 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		struct address_space *mapping;
 		struct page *page;
 		int may_enter_fs;
+#ifdef CONFIG_PROCESS_RECLAIM
+		enum page_references references = PAGEREF_RECLAIM;
+#else
 		enum page_references references = PAGEREF_RECLAIM_CLEAN;
+#endif
 		bool dirty, writeback;
 
 		cond_resched();
@@ -1530,6 +1625,56 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 	mod_node_page_state(zone->zone_pgdat, NR_ISOLATED_FILE, -ret);
 	return ret;
 }
+
+#ifdef CONFIG_PROCESS_RECLAIM
+unsigned long reclaim_pages(struct list_head *page_list)
+{
+	unsigned long nr_reclaimed;
+	struct page *page;
+	unsigned long nr_isolated[2] = {0, };
+	struct reclaim_stat stat = {};
+	struct pglist_data *pgdat = NULL;
+	struct scan_control sc = {
+		.gfp_mask = GFP_KERNEL,
+		.priority = DEF_PRIORITY,
+		.may_writepage = 1,
+		.may_unmap = 1,
+		.may_swap = 1,
+	};
+
+	if (list_empty(page_list))
+		return 0;
+
+	list_for_each_entry(page, page_list, lru) {
+		ClearPageActive(page);
+		if (pgdat == NULL)
+			pgdat = page_pgdat(page);
+		/* XXX: It could be multiple node in other config */
+		WARN_ON_ONCE(pgdat != page_pgdat(page));
+		if (!page_is_file_cache(page))
+			nr_isolated[0]++;
+		else
+			nr_isolated[1]++;
+	}
+
+	mod_node_page_state(pgdat, NR_ISOLATED_ANON, nr_isolated[0]);
+	mod_node_page_state(pgdat, NR_ISOLATED_FILE, nr_isolated[1]);
+
+	nr_reclaimed = shrink_page_list(page_list, pgdat, &sc,
+			TTU_IGNORE_ACCESS, &stat, true);
+
+	while (!list_empty(page_list)) {
+		page = lru_to_page(page_list);
+		list_del(&page->lru);
+		putback_lru_page(page);
+	}
+
+	mod_node_page_state(pgdat, NR_ISOLATED_ANON, -nr_isolated[0]);
+	mod_node_page_state(pgdat, NR_ISOLATED_FILE, -nr_isolated[1]);
+
+	return nr_reclaimed;
+}
+#endif
 
 /*
  * Attempt to remove the specified page from its LRU.  Only take this page
@@ -2895,6 +3040,9 @@ static inline bool compaction_ready(struct zone *zone, struct scan_control *sc)
  */
 static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 {
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+	unsigned long time_start = jiffies;
+#endif
 	struct zoneref *z;
 	struct zone *zone;
 	unsigned long nr_soft_reclaimed;
@@ -2976,6 +3124,11 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 	 * promoted it to __GFP_HIGHMEM.
 	 */
 	sc->gfp_mask = orig_mask;
+
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+	atomic_add((jiffies-time_start), &time_cnt_table[shrink_zones_count].lone_time);
+	atomic_inc(&time_cnt_table[shrink_zones_count].do_cnt);
+#endif
 }
 
 static void snapshot_refaults(struct mem_cgroup *root_memcg, pg_data_t *pgdat)
@@ -3012,6 +3165,9 @@ static void snapshot_refaults(struct mem_cgroup *root_memcg, pg_data_t *pgdat)
 static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 					  struct scan_control *sc)
 {
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+	unsigned long time_start = jiffies;
+#endif
 	int initial_priority = sc->priority;
 	pg_data_t *last_pgdat;
 	struct zoneref *z;
@@ -3053,6 +3209,11 @@ retry:
 	}
 
 	delayacct_freepages_end();
+
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+	atomic_add((jiffies-time_start), &time_cnt_table[do_try_to_free_pages_count].lone_time);
+	atomic_inc(&time_cnt_table[do_try_to_free_pages_count].do_cnt);
+#endif
 
 	if (sc->nr_reclaimed)
 		return sc->nr_reclaimed;
@@ -3105,7 +3266,11 @@ static bool allow_direct_reclaim(pg_data_t *pgdat)
 	if (!wmark_ok && waitqueue_active(&pgdat->kswapd_wait)) {
 		pgdat->kswapd_classzone_idx = min(pgdat->kswapd_classzone_idx,
 						(enum zone_type)ZONE_NORMAL);
+#ifdef CONFIG_MP_MULTIPLE_KSWAPDS
+		wake_up_interruptible_all(&pgdat->kswapd_wait);
+#else
 		wake_up_interruptible(&pgdat->kswapd_wait);
+#endif
 	}
 
 	return wmark_ok;
@@ -3207,6 +3372,10 @@ out:
 unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 				gfp_t gfp_mask, nodemask_t *nodemask)
 {
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+	unsigned long time_start = jiffies;
+#endif
+
 	unsigned long nr_reclaimed;
 	struct scan_control sc = {
 		.nr_to_reclaim = SWAP_CLUSTER_MAX,
@@ -3233,8 +3402,13 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 	 * 1 is returned so that the page allocator does not OOM kill at this
 	 * point.
 	 */
-	if (throttle_direct_reclaim(sc.gfp_mask, zonelist, nodemask))
+	if (throttle_direct_reclaim(sc.gfp_mask, zonelist, nodemask)) {
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+		atomic_add((jiffies-time_start), &time_cnt_table[try_to_free_pages_count].lone_time);
+		atomic_inc(&time_cnt_table[try_to_free_pages_count].do_cnt);
+#endif
 		return 1;
+	}
 
 	trace_mm_vmscan_direct_reclaim_begin(order,
 				sc.may_writepage,
@@ -3245,6 +3419,10 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 
 	trace_mm_vmscan_direct_reclaim_end(nr_reclaimed);
 
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_MONITOR
+	atomic_add((jiffies-time_start), &time_cnt_table[try_to_free_pages_count].lone_time);
+	atomic_inc(&time_cnt_table[try_to_free_pages_count].do_cnt);
+#endif
 	return nr_reclaimed;
 }
 
@@ -3852,7 +4030,11 @@ void wakeup_kswapd(struct zone *zone, gfp_t gfp_flags, int order,
 
 	trace_mm_vmscan_wakeup_kswapd(pgdat->node_id, classzone_idx, order,
 				      gfp_flags);
+#ifdef CONFIG_MP_MULTIPLE_KSWAPDS
+	wake_up_interruptible_all(&pgdat->kswapd_wait);
+#else
 	wake_up_interruptible(&pgdat->kswapd_wait);
+#endif
 }
 
 #ifdef CONFIG_HIBERNATION
@@ -3931,7 +4113,21 @@ int kswapd_run(int nid)
 		return 0;
 
 	pgdat->kswapd = kthread_run(kswapd, pgdat, "kswapd%d", nid);
-	if (IS_ERR(pgdat->kswapd)) {
+#ifdef CONFIG_MP_MULTIPLE_KSWAPDS
+	struct sched_param param_high_prority = { .sched_priority = 0 };
+    pgdat->kswapd1 = kthread_run(kswapd, pgdat, "kswapd1%d", nid);
+    if (IS_ERR(pgdat->kswapd1)) {
+		/* failure at boot is fatal */
+		BUG_ON(system_state < SYSTEM_RUNNING);
+		pr_err("Failed to start kswapd1 on node %d\n", nid);
+		ret = PTR_ERR(pgdat->kswapd1);
+		pgdat->kswapd1 = NULL;
+
+	}
+	if (pgdat->kswapd1)
+    	sched_setscheduler_nocheck(pgdat->kswapd1, SCHED_IDLE, &param_high_prority);
+#endif
+    if (IS_ERR(pgdat->kswapd)) {
 		/* failure at boot is fatal */
 		BUG_ON(system_state < SYSTEM_RUNNING);
 		pr_err("Failed to start kswapd on node %d\n", nid);

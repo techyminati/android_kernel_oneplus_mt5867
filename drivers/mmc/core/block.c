@@ -56,6 +56,9 @@
 #include "mmc_ops.h"
 #include "quirks.h"
 #include "sd_ops.h"
+#ifdef CONFIG_MMC_MSTAR_MMC_EMMC
+#include "eMMC.h"
+#endif
 
 MODULE_ALIAS("mmc:block");
 #ifdef MODULE_PARAM_PREFIX
@@ -166,6 +169,10 @@ static DEFINE_MUTEX(open_lock);
 
 module_param(perdev_minors, int, 0444);
 MODULE_PARM_DESC(perdev_minors, "Minors numbers to allocate per device");
+
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+static struct str_waitfor_dev waitfor;
+#endif
 
 static inline int mmc_blk_part_switch(struct mmc_card *card,
 				      unsigned int part_type);
@@ -691,6 +698,234 @@ cmd_done:
 	return ioc_err ? ioc_err : err;
 }
 
+#if defined(CONFIG_PLAT_MSTAR)
+static int mmc_blk_ioctl_cmd_rpmb(struct mmc_blk_data *md,
+	unsigned int user_cmd, unsigned long user_arg)
+{
+	struct mmc_card *card;
+	struct mmc_command sbc;
+	struct mmc_command cmd;
+	struct mmc_data data;
+
+	struct mmc_request mrq;
+	struct scatterlist sg;
+	int err = -EINVAL;
+	unsigned char *buff = NULL;
+
+
+
+	memset(&mrq, 0, sizeof(struct mmc_request));
+	memset(&sbc, 0, sizeof(struct mmc_command));
+	memset(&cmd, 0, sizeof(struct mmc_command));
+	memset(&data, 0, sizeof(struct mmc_data));
+	mrq.sbc  = &sbc;
+	mrq.cmd  = &cmd;
+	mrq.data = &data;
+
+	card = md->queue.card;
+	if (IS_ERR(card)) {
+		err = PTR_ERR(card);
+		goto cmd_done;
+	}
+
+	if(_IOC_DIR(user_cmd) == _IOC_NONE)
+	{
+		if(_IOC_NR(user_cmd)==64)
+		{
+			err =0;
+			mmc_claim_host(card->host);
+			err = mmc_switch(card,
+					EXT_CSD_CMD_SET_NORMAL,
+					EXT_CSD_PART_CONFIG,
+					0xB,
+					card->ext_csd.generic_cmd6_time);
+			if(err)
+				goto cmd_done;
+
+		}
+		else if(_IOC_NR(user_cmd)==65)
+		{
+			err =0;
+			err = mmc_switch(card,
+					EXT_CSD_CMD_SET_NORMAL,
+					EXT_CSD_PART_CONFIG,
+					/*0x8,*/
+					card->ext_csd.part_config,
+					card->ext_csd.generic_cmd6_time);
+			mmc_release_host(card->host);
+			if(err)
+				goto cmd_done;
+
+		}
+	}
+	else if(_IOC_DIR(user_cmd) == _IOC_WRITE)
+	{
+		if(_IOC_NR(user_cmd)==66)//rpmb request  command
+		{
+			err =0;
+			buff = kzalloc(0x200, GFP_KERNEL);
+			if (!buff)
+			{
+				printk(KERN_ERR "alloc 0x200 bytes buffer failed!\n");
+				err = -ENOMEM;
+				goto cmd_done;
+			}
+
+			if(copy_from_user((void *)buff,(void __user*) user_arg, 0x200))
+			{
+				printk(KERN_ERR "copy user space to kernel space failed!\n");
+				err = -EFAULT;
+				kfree(buff);
+				goto cmd_done;
+			}
+
+			data.blksz = 512;
+			data.blocks = 1;
+			data.flags = MMC_DATA_WRITE;
+
+			sbc.opcode = MMC_SET_BLOCK_COUNT;
+			sbc.arg = 1;
+			sbc.flags = MMC_RSP_R1 | MMC_CMD_AC;
+
+			cmd.opcode = MMC_WRITE_MULTIPLE_BLOCK;
+			cmd.arg = 0;
+			cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
+
+			data.sg = &sg;
+			data.sg_len = 1;
+			sg_init_one(&sg, buff, 512);
+			mmc_set_data_timeout(&data, card);
+			mmc_wait_for_req(card->host, &mrq);
+			if (cmd.error) {
+				dev_err(mmc_dev(card->host), "%s: cmd error %d\n",
+				                __func__, cmd.error);
+				err = cmd.error;
+				kfree(buff);
+				goto cmd_done;
+			}
+			if (data.error) {
+				dev_err(mmc_dev(card->host), "%s: data error %d\n",
+				                __func__, data.error);
+				err = data.error;
+				kfree(buff);
+				goto cmd_done;
+			}
+			kfree(buff);
+		}
+		else if(_IOC_NR(user_cmd)==67)//rpmb auth data write request
+		{
+			err =0;
+			buff = (unsigned char *)__get_free_pages(GFP_KERNEL, get_order(_IOC_SIZE(user_cmd)<<9));
+			if (!buff)
+			{
+				printk(KERN_ERR "alloc %XH bytes buffer failed!\n",_IOC_SIZE(user_cmd)<<9);
+				err = -ENOMEM;
+				goto cmd_done;
+			}
+
+			if(copy_from_user((void *)buff,(void __user*) user_arg, _IOC_SIZE(user_cmd)<<9))
+			{
+				printk(KERN_ERR "copy user space to kernel space failed!\n");
+				err = -EFAULT;
+				free_pages((unsigned long)buff, get_order(_IOC_SIZE(user_cmd)<<9));
+				goto cmd_done;
+			}
+
+			data.blksz = 512;
+			data.blocks = _IOC_SIZE(user_cmd);
+			data.flags = MMC_DATA_WRITE;
+
+			sbc.opcode = MMC_SET_BLOCK_COUNT;
+			sbc.arg = data.blocks | (1 << 31);
+			sbc.flags = MMC_RSP_R1 | MMC_CMD_AC;
+
+			cmd.opcode = MMC_WRITE_MULTIPLE_BLOCK;
+			cmd.arg = 0;
+			cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
+
+			data.sg = &sg;
+			data.sg_len = 1;
+			sg_init_one(&sg, buff, _IOC_SIZE(user_cmd)<<9);
+			mmc_set_data_timeout(&data, card);
+			mmc_wait_for_req(card->host, &mrq);
+			if (cmd.error) {
+				dev_err(mmc_dev(card->host), "%s: cmd error %d\n",
+				                __func__, cmd.error);
+				err = cmd.error;
+				free_pages((unsigned long)buff, get_order(_IOC_SIZE(user_cmd)<<9));
+				goto cmd_done;
+			}
+			if (data.error) {
+				dev_err(mmc_dev(card->host), "%s: data error %d\n",
+				                __func__, data.error);
+				err = data.error;
+				free_pages((unsigned long)buff, get_order(_IOC_SIZE(user_cmd)<<9));
+				goto cmd_done;
+			}
+			free_pages((unsigned long)buff, get_order(_IOC_SIZE(user_cmd)<<9));
+		}
+	}
+	else if(_IOC_DIR(user_cmd) == _IOC_READ)
+	{
+		if(_IOC_NR(user_cmd)==68)//Auth data read
+		{
+			err = 0;
+			buff = (unsigned char *)__get_free_pages(GFP_KERNEL, get_order(_IOC_SIZE(user_cmd)<<9));
+			if (!buff)
+			{
+				printk(KERN_ERR "alloc %XH buffer failed!\n",_IOC_SIZE(user_cmd)<<9);
+				err = -ENOMEM;
+				goto cmd_done;
+			}
+
+			data.blksz = 512;
+			data.blocks = _IOC_SIZE(user_cmd);
+			data.flags = MMC_DATA_READ;
+
+			sbc.opcode = MMC_SET_BLOCK_COUNT;
+			sbc.arg = data.blocks;
+			sbc.flags = MMC_RSP_R1 | MMC_CMD_AC;
+
+			cmd.opcode = MMC_READ_MULTIPLE_BLOCK;
+			cmd.arg = 0;
+			cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
+
+			data.sg = &sg;
+			data.sg_len = 1;
+			sg_init_one(&sg, buff, _IOC_SIZE(user_cmd)<<9);
+			mmc_set_data_timeout(&data, card);
+			mmc_wait_for_req(card->host, &mrq);
+			if (cmd.error) {
+				dev_err(mmc_dev(card->host), "%s: cmd error %d\n",
+				                __func__, cmd.error);
+				err = cmd.error;
+				free_pages((unsigned long)buff, get_order(_IOC_SIZE(user_cmd)<<9));
+				goto cmd_done;
+			}
+			if (data.error) {
+				dev_err(mmc_dev(card->host), "%s: data error %d\n",
+				                __func__, data.error);
+				err = data.error;
+				free_pages((unsigned long)buff, get_order(_IOC_SIZE(user_cmd)<<9));
+				goto cmd_done;
+			}
+			if(copy_to_user((void __user*) user_arg, (void *)buff, _IOC_SIZE(user_cmd)<<9))
+			{
+				printk(KERN_ERR "copy kernel space to user space failed!\n");
+				err = -EFAULT;
+				free_pages((unsigned long)buff, get_order(_IOC_SIZE(user_cmd)<<9));
+				goto cmd_done;
+			}
+
+			free_pages((unsigned long)buff, get_order(_IOC_SIZE(user_cmd)<<9));
+		}
+	}
+
+cmd_done:
+
+	return err;
+}
+#endif
 static int mmc_blk_ioctl_multi_cmd(struct mmc_blk_data *md,
 				   struct mmc_ioc_multi_cmd __user *user,
 				   struct mmc_rpmb_data *rpmb)
@@ -2451,9 +2686,15 @@ static long mmc_rpmb_ioctl(struct file *filp, unsigned int cmd,
 					(struct mmc_ioc_multi_cmd __user *)arg,
 					rpmb);
 		break;
+#ifdef CONFIG_PLAT_MSTAR
+	default:
+		ret = mmc_blk_ioctl_cmd_rpmb(rpmb->md, cmd, arg);
+		break;
+#else
 	default:
 		ret = -EINVAL;
 		break;
+#endif
 	}
 
 	return ret;
@@ -2982,6 +3223,10 @@ static int mmc_blk_suspend(struct device *dev)
 {
 	struct mmc_card *card = mmc_dev_to_card(dev);
 
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+	if (waitfor.stage1_s_wait)
+		wait_for_completion(&(waitfor.stage1_s_wait->power.completion));
+#endif
 	return _mmc_blk_suspend(card);
 }
 
@@ -2991,6 +3236,10 @@ static int mmc_blk_resume(struct device *dev)
 	struct mmc_blk_data *md = dev_get_drvdata(dev);
 
 	if (md) {
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+		if (waitfor.stage1_r_wait)
+			wait_for_completion(&(waitfor.stage1_r_wait->power.completion));
+#endif
 		/*
 		 * Resume involves the card going into idle state,
 		 * so current partition is always the main one.
@@ -3005,8 +3254,11 @@ static int mmc_blk_resume(struct device *dev)
 }
 #endif
 
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+static struct dev_pm_ops mmc_blk_pm_ops;
+#else
 static SIMPLE_DEV_PM_OPS(mmc_blk_pm_ops, mmc_blk_suspend, mmc_blk_resume);
-
+#endif
 static struct mmc_driver mmc_driver = {
 	.drv		= {
 		.name	= "mmcblk",
@@ -3020,6 +3272,23 @@ static struct mmc_driver mmc_driver = {
 static int __init mmc_blk_init(void)
 {
 	int res;
+#if (!defined CONFIG_MSTAR_SDMMC) && (!defined (CONFIG_MSTAR_FCIE_HOST)) && (!defined (CONFIG_MSTAR_SDIO_HOST))
+	U16 u16_regval = 0;
+
+#ifdef IP_FCIE_VERSION_5
+	u16_regval = REG_FCIE(FCIE_NC_FUN_CTL);	//fcie reset doesn't reset to default value
+
+	/* if nc_en is set */
+	if( (u16_regval & BIT0) == BIT0 )
+		return 0;
+#else
+	u16_regval = REG_FCIE(FCIE_REG16h);
+
+	if( (u16_regval & BIT_KERN_CHK_NAND_EMMC) == BIT_KERN_CHK_NAND_EMMC )
+		if( (u16_regval & BIT_KERN_EMMC) != BIT_KERN_EMMC )
+			return 0;
+#endif
+#endif
 
 	res  = bus_register(&mmc_rpmb_bus_type);
 	if (res < 0) {
@@ -3045,6 +3314,11 @@ static int __init mmc_blk_init(void)
 	if (res)
 		goto out_blkdev_unreg;
 
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+	of_mstar_str("mmcblk", NULL, &mmc_blk_pm_ops, &waitfor,
+			&mmc_blk_suspend, &mmc_blk_resume,
+			NULL, NULL);
+#endif
 	return 0;
 
 out_blkdev_unreg:

@@ -17,6 +17,28 @@
 #include <linux/debugfs.h>
 #include "sync_debug.h"
 
+#ifndef CONFIG_DEBUG_FS
+static LIST_HEAD(sync_timeline_list_head);
+static DEFINE_SPINLOCK(sync_timeline_list_lock);
+
+void sync_timeline_debug_add(struct sync_timeline *obj)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&sync_timeline_list_lock, flags);
+	list_add_tail(&obj->sync_timeline_list, &sync_timeline_list_head);
+	spin_unlock_irqrestore(&sync_timeline_list_lock, flags);
+}
+
+void sync_timeline_debug_remove(struct sync_timeline *obj)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&sync_timeline_list_lock, flags);
+	list_del(&obj->sync_timeline_list);
+	spin_unlock_irqrestore(&sync_timeline_list_lock, flags);
+}
+#else
 static struct dentry *dbgfs;
 
 static LIST_HEAD(sync_timeline_list_head);
@@ -201,7 +223,7 @@ static __init int sync_debugfs_init(void)
 	 */
 	debugfs_create_file_unsafe("info", 0444, dbgfs, NULL,
 				   &sync_info_debugfs_fops);
-	debugfs_create_file_unsafe("sw_sync", 0644, dbgfs, NULL,
+	debugfs_create_file_unsafe("sw_sync", 0666, dbgfs, NULL,
 				   &sw_sync_debugfs_fops);
 
 	return 0;
@@ -233,3 +255,4 @@ void sync_dump(void)
 		}
 	}
 }
+#endif

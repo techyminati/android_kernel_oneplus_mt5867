@@ -122,6 +122,13 @@ config PM_AUTOSLEEP
 	Allow the kernel to trigger a system transition into a global sleep
 	state automatically whenever there are no active wakeup sources.
 
+config PM_CUST
+	bool "PM CUSTOMIZATION"
+	depends on PM_AUTOSLEEP
+	default n
+	---help---
+	Add customization to kernel power manager.
+
 config PM_WAKELOCKS
 	bool "User space wakeup sources interface"
 	depends on PM_SLEEP

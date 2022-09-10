@@ -57,7 +57,7 @@ struct cpu_operations {
 	void		(*cpu_die)(unsigned int cpu);
 	int		(*cpu_kill)(unsigned int cpu);
 #endif
-#ifdef CONFIG_CPU_IDLE
+#if defined(CONFIG_CPU_IDLE) || defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
 	int		(*cpu_init_idle)(unsigned int);
 	int		(*cpu_suspend)(unsigned long);
 #endif

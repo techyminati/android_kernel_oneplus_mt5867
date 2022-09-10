@@ -13,6 +13,15 @@ obj-y     = fork.o exec_domain.o panic.o \
 	    async.o range.o smpboot.o ucount.o
 
 obj-$(CONFIG_MODULES) += kmod.o
+
+# compatiblity with mstar
+EXTRA_CFLAGS      +=  -Idrivers/mstar/mbx/drv
+EXTRA_CFLAGS      +=  -Idrivers/mstar/include
+
+# compatiblity with mstar2
+EXTRA_CFLAGS      +=  -Idrivers/mstar2/drv/mbx
+EXTRA_CFLAGS      +=  -Idrivers/mstar2/include
+
 obj-$(CONFIG_MULTIUSER) += groups.o
 
 ifdef CONFIG_FUNCTION_TRACER

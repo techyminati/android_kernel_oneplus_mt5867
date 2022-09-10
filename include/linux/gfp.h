@@ -625,6 +625,10 @@ extern void free_contig_range(unsigned long pfn, unsigned nr_pages);
 #ifdef CONFIG_CMA
 /* CMA stuff */
 extern void init_cma_reserved_pageblock(struct page *page);
+
+#ifdef CONFIG_MP_CMA_PATCH_CMA_AGGRESSIVE_ALLOC
+extern void adjust_managed_cma_page_count(struct zone *zone, long count);
+#endif  //CONFIG_MP_CMA_PATCH_CMA_AGGRESSIVE_ALLOC
 #endif
 
 #endif /* __LINUX_GFP_H */

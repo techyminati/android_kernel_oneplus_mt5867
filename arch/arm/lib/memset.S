@@ -16,6 +16,10 @@
 	.text
 	.align	5
 
+#ifdef CONFIG_KASAN
+.weak memset
+ENTRY(__memset)
+#endif
 ENTRY(mmioset)
 ENTRY(memset)
 UNWIND( .fnstart         )
@@ -135,6 +139,9 @@ UNWIND( .fnstart            )
 UNWIND( .fnend   )
 ENDPROC(memset)
 ENDPROC(mmioset)
+#ifdef CONFIG_KASAN
+ENDPROC(__memset)
+#endif
 
 ENTRY(__memset32)
 UNWIND( .fnstart         )

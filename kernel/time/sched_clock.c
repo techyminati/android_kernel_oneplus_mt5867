@@ -140,7 +140,7 @@ static void update_clock_read_data(struct clock_read_data *rd)
 /*
  * Atomically update the sched_clock() epoch.
  */
-static void update_sched_clock(void)
+void update_sched_clock(void)
 {
 	u64 cyc;
 	u64 ns;

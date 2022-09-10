@@ -14,6 +14,8 @@
 #include <generated/bounds.h>
 #endif /* !__GENERATING_BOUNDS_H */
 
+#include <mstar/mpatch_macro.h> //Mstar patch macro
+
 /*
  * Various page->flags bits:
  *
@@ -494,6 +496,10 @@ int __test_set_page_writeback(struct page *page, bool keep_write);
 	__test_set_page_writeback(page, false)
 #define test_set_page_writeback_keepwrite(page)	\
 	__test_set_page_writeback(page, true)
+
+#if (MP_NTFS3G_WRAP==1)
+int test_clear_page_writeback_wrap(struct page *page);  //AlanYu 20111121 : wrap for test_clear_page_writeback
+#endif
 
 static inline void set_page_writeback(struct page *page)
 {

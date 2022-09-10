@@ -31,6 +31,7 @@
 #include <linux/syscore_ops.h>
 #include <linux/tick.h>
 #include <trace/events/power.h>
+#include <mstar/mpatch_macro.h>
 
 static LIST_HEAD(cpufreq_policy_list);
 
@@ -65,6 +66,10 @@ static LIST_HEAD(cpufreq_governor_list);
 static struct cpufreq_driver *cpufreq_driver;
 static DEFINE_PER_CPU(struct cpufreq_policy *, cpufreq_cpu_data);
 static DEFINE_RWLOCK(cpufreq_driver_lock);
+
+#if defined(CONFIG_MP_DVFS_FORCE_SET_TARGET_FREQ) && defined(CONFIG_MSTAR_DVFS)
+extern bool forcibly_set_target_flag[CONFIG_NR_CPUS];
+#endif
 
 /* Flag to suspend/resume CPUFreq governors */
 static bool cpufreq_suspended;
@@ -1220,6 +1225,8 @@ static int cpufreq_online(unsigned int cpu)
 	/* call driver. From then on the cpufreq must be able
 	 * to accept all calls to ->verify and ->setpolicy for this CPU
 	 */
+	pr_info("\033[35m%s(%d): do cpufreq_driver->init\033[m\n",
+					__func__, __LINE__);
 	ret = cpufreq_driver->init(policy);
 	if (ret) {
 		pr_debug("initialization failed\n");
@@ -1288,8 +1295,8 @@ static int cpufreq_online(unsigned int cpu)
 		ret = cpufreq_frequency_table_get_index(policy, policy->cur);
 		if (ret == -EINVAL) {
 			/* Warn user and fix it */
-			pr_warn("%s: CPU%d: Running at unlisted freq: %u KHz\n",
-				__func__, policy->cpu, policy->cur);
+			pr_warn("%s(%d): CPU%d: Running at unlisted freq: %u KHz\n",
+				__func__, __LINE__, policy->cpu, policy->cur);
 			ret = __cpufreq_driver_target(policy, policy->cur - 1,
 				CPUFREQ_RELATION_L);
 
@@ -1364,7 +1371,7 @@ static int cpufreq_add_dev(struct device *dev, struct subsys_interface *sif)
 	unsigned cpu = dev->id;
 	int ret;
 
-	dev_dbg(dev, "%s: adding CPU%u\n", __func__, cpu);
+	printk("\033[32mFunction = %s, Line = %d, adding CPU %u\033[m\n", __PRETTY_FUNCTION__, __LINE__, cpu);
 
 	if (cpu_online(cpu)) {
 		ret = cpufreq_online(cpu);
@@ -1663,7 +1670,7 @@ void cpufreq_suspend(void)
 	if (!has_target() && !cpufreq_driver->suspend)
 		goto suspend;
 
-	pr_debug("%s: Suspending Governors\n", __func__);
+	printk("%s: Suspending Governors\n", __func__);
 
 	for_each_active_policy(policy) {
 		if (has_target()) {
@@ -1703,7 +1710,7 @@ void cpufreq_resume(void)
 	if (!has_target() && !cpufreq_driver->resume)
 		return;
 
-	pr_debug("%s: Resuming Governors\n", __func__);
+	pr_info("%s: Resuming Governors\n", __func__);
 
 	for_each_active_policy(policy) {
 		if (cpufreq_driver->resume && cpufreq_driver->resume(policy)) {
@@ -1990,7 +1997,12 @@ int __cpufreq_driver_target(struct cpufreq_policy *policy,
 	 * exactly same freq is called again and so we can save on few function
 	 * calls.
 	 */
-	if (target_freq == policy->cur)
+	/* if T_Sensor exception case, do not return */
+	if ( (target_freq == policy->cur)
+#if defined(CONFIG_MP_DVFS_FORCE_SET_TARGET_FREQ) && defined(CONFIG_MSTAR_DVFS)
+		&& (forcibly_set_target_flag[policy->cpu] == 0)
+#endif
+	)
 		return 0;
 
 	/* Save last value to restore later on errors */
@@ -2291,6 +2303,7 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	}
 
 	/* start new governor */
+	pr_info("%s(%d): re-assign governor\n", __func__, __LINE__);
 	policy->governor = new_policy->governor;
 	ret = cpufreq_init_governor(policy);
 	if (!ret) {

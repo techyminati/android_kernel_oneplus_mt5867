@@ -39,6 +39,22 @@
 #define RAMOOPS_KERNMSG_HDR "===="
 #define MIN_MEM_SIZE 4096UL
 
+// This memory region will be reserved @ arch/arm64/mm/init.c
+struct ramoops_platform_data ramoops_data = {
+	.mem_size = 0x100000,
+	.mem_address = 0x23500000,
+	.record_size = 0x40000,
+	.console_size = 0x40000,
+	.pmsg_size = 0x40000,
+};
+
+static struct platform_device ramoops_dev = {
+	.name = "ramoops",
+	.dev = {
+		.platform_data = &ramoops_data,
+	},
+};
+
 static ulong record_size = MIN_MEM_SIZE;
 module_param(record_size, ulong, 0400);
 MODULE_PARM_DESC(record_size,

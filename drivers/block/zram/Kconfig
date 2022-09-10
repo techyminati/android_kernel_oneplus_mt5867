@@ -39,3 +39,28 @@ config ZRAM_MEMORY_TRACKING
 	  /sys/kernel/debug/zram/zramX/block_state.
 
 	  See Documentation/blockdev/zram.txt for more information.
+
+config MP_ZSM
+	bool "ZRAM same page merging"
+	depends on ZRAM
+	default y
+	help
+	  The maximum zram size for the implementation is about 1024MB-4KB (18bits).
+	  This feature will find same page in zram and merge these same pages
+	  in order to save memory with some zram execution overhead.
+	  Turn on "ZSM" with "/sys/block/zram0/zsm_on"
+
+config MP_ZSM_STAT
+	bool "ZSM statistics"
+	depends on MP_ZSM
+	default y
+	help
+	  Providing basic statistics to show the influence of ZSM.
+
+config MP_ZSM_DEBUG
+	bool "ZSM debug information"
+	depends on MP_ZSM
+	default n
+	help
+	  Providing debug information of ZSM as histories for each zram_table_entry.
+	  Also provide ZSM metadata verification.

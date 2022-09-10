@@ -3929,8 +3929,13 @@ static noinline void __schedule_bug(struct task_struct *prev)
 		print_ip_sym(preempt_disable_ip);
 		pr_cont("\n");
 	}
+#ifdef CONFIG_MP_POTENTIAL_BUG
+	panic("MTK panic, scheduling while atomic: %s/%d/0x%08x\n",
+		prev->comm, prev->pid, preempt_count());
+#else
 	if (panic_on_warn)
 		panic("scheduling while atomic\n");
+#endif
 
 	dump_stack();
 	add_taint(TAINT_WARN, LOCKDEP_STILL_OK);
@@ -5965,9 +5970,16 @@ void sched_show_task(struct task_struct *p)
 {
 	unsigned long free = 0;
 	int ppid;
+#ifdef CONFIG_MP_POTENTIAL_BUG
+	int saved_console_loglevel = console_loglevel;
+#endif
 
 	if (!try_get_task_stack(p))
 		return;
+
+#ifdef CONFIG_MP_POTENTIAL_BUG
+	console_verbose();
+#endif
 
 	printk(KERN_INFO "%-15.15s %c", p->comm, task_state_to_char(p));
 
@@ -5988,6 +6000,9 @@ void sched_show_task(struct task_struct *p)
 	print_worker_info(KERN_INFO, p);
 	show_stack(p, NULL);
 	put_task_stack(p);
+#ifdef CONFIG_MP_POTENTIAL_BUG
+	console_loglevel = saved_console_loglevel;
+#endif
 }
 EXPORT_SYMBOL_GPL(sched_show_task);
 
@@ -6050,6 +6065,7 @@ void show_state_filter(unsigned long state_filter)
 	if (!state_filter)
 		debug_show_all_locks();
 }
+EXPORT_SYMBOL(show_state_filter);
 
 /**
  * init_idle - set up an idle thread for a given CPU
@@ -6765,6 +6781,11 @@ void __init sched_init(void)
 #ifdef CONFIG_SMP
 	idle_thread_set_boot_cpu();
 #endif
+
+#if defined(CONFIG_MP_AUDIO_DECODE_PERFORMANCE)
+	memset(sysctl_audio_process_name,'\0',sizeof(TASK_COMM_LEN*sizeof(char)));
+#endif
+
 	init_sched_fair_class();
 
 	init_schedstats();
@@ -6845,6 +6866,10 @@ void ___might_sleep(const char *file, int line, int preempt_offset)
 		print_ip_sym(preempt_disable_ip);
 		pr_cont("\n");
 	}
+#ifdef CONFIG_MP_POTENTIAL_BUG
+	panic("MTK panic, sleeping function called from invalid context at %s:%d\n",
+		file, line);
+#endif
 	dump_stack();
 	add_taint(TAINT_WARN, LOCKDEP_STILL_OK);
 }

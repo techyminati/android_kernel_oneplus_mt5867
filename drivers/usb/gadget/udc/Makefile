@@ -2,6 +2,17 @@
 # define_trace.h needs to know how to find our header
 CFLAGS_trace.o			:= -I$(src)
 
+# compatiblity with mstar
+EXTRA_CFLAGS      += -Idrivers/mstar/usb
+
+# compatiblity with mstar2
+ifeq ($(CONFIG_ONEHAL_ARCH_SUPPORT),y)
+ONEHAL_VERSION = $(subst \",,$(CONFIG_ONEHAL_VERSION))
+ONEHAL_DIR = ver_$(ONEHAL_VERSION)
+EXTRA_CFLAGS      += -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/usb/$(ONEHAL_DIR)
+endif
+EXTRA_CFLAGS      += -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/usb
+
 udc-core-y			:= core.o trace.o
 
 #
@@ -34,6 +45,8 @@ obj-$(CONFIG_USB_EG20T)		+= pch_udc.o
 obj-$(CONFIG_USB_MV_UDC)	+= mv_udc.o
 mv_udc-y			:= mv_udc_core.o
 obj-$(CONFIG_USB_FUSB300)	+= fusb300_udc.o
+obj-$(CONFIG_USB_MSB250X)	+= udc-msb250x.o
+udc-msb250x-y := msb250x_udc.o ms_dma.o
 obj-$(CONFIG_USB_FOTG210_UDC)	+= fotg210-udc.o
 obj-$(CONFIG_USB_MV_U3D)	+= mv_u3d_core.o
 obj-$(CONFIG_USB_GR_UDC)	+= gr_udc.o

@@ -3,7 +3,7 @@
  * Functions for working with the Flattened Device Tree data format
  *
  * Copyright 2009 Benjamin Herrenschmidt, IBM Corp
- * benh@kernel.crashing.org
+ * benh@kernel.crashing.org 
  */
 
 #define pr_fmt(fmt)	"OF: fdt: " fmt
@@ -25,6 +25,7 @@
 #include <linux/debugfs.h>
 #include <linux/serial_core.h>
 #include <linux/sysfs.h>
+#include <mstar/mpatch_macro.h>
 #include <linux/random.h>
 
 #include <asm/setup.h>  /* for COMMAND_LINE_SIZE */
@@ -999,14 +1000,37 @@ static void __early_init_dt_declare_initrd(unsigned long start,
  * early_init_dt_check_for_initrd - Decode initrd location from flat tree
  * @node: reference to node containing initrd location ('chosen')
  */
+#if (MP_PLATFORM_ARM_64bit_PORTING == 1 || MP_PLATFORM_ARM_32bit_PORTING == 1)
+extern unsigned long __ramdisk_start, __ramdisk_len;
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 1)
+extern unsigned long __cmdline;
+char* cmd_ptr;
+#endif
+#endif
 static void __init early_init_dt_check_for_initrd(unsigned long node)
 {
 	u64 start, end;
 	int len;
 	const __be32 *prop;
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 1)
+	cmd_ptr = (char *)__cmdline;
+#endif
 
 	pr_debug("Looking for initrd properties... ");
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 1)
+	/*
+	 * ramdisk porting problem,
+	 * move patch from 3.10.40 (Perforce #cl 1038050)
+	*/
+	pr_info("%s: Looking for initrd properties... \n", __func__);
+	pr_info("%s: initrd_start = 0x%lx  initrd_end = 0x%lx\n",
+			__func__, __ramdisk_start, __ramdisk_start + __ramdisk_len);
 
+	initrd_start = (unsigned long)__va(__ramdisk_start);
+	initrd_end = (unsigned long)__va(__ramdisk_start+__ramdisk_len);
+	initrd_below_start_ok = 1;
+
+#else
 	prop = of_get_flat_dt_prop(node, "linux,initrd-start", &len);
 	if (!prop)
 		return;
@@ -1018,9 +1042,11 @@ static void __init early_init_dt_check_for_initrd(unsigned long node)
 	end = of_read_number(prop, len/4);
 
 	__early_init_dt_declare_initrd(start, end);
-
-	pr_debug("initrd_start=0x%llx  initrd_end=0x%llx\n",
+#endif
+	pr_debug("initrd_start = 0x%llx  initrd_end = 0x%llx\n",
 		 (unsigned long long)start, (unsigned long long)end);
+	printk("initrd_start = 0x%llx  initrd_end = 0x%llx\n",
+		 (unsigned long long)initrd_start, (unsigned long long)initrd_end);
 }
 #else
 static inline void early_init_dt_check_for_initrd(unsigned long node)
@@ -1146,6 +1172,21 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 
 		base = dt_mem_next_cell(dt_root_addr_cells, &reg);
 		size = dt_mem_next_cell(dt_root_size_cells, &reg);
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 0)
+		if(lx_num == 0){
+			linux_memory_address = base;
+			linux_memory_length = size;
+		}
+		else if(lx_num == 1){
+			linux_memory2_address = base;
+			linux_memory2_length = size;
+		}
+		else if(lx_num == 2){
+			linux_memory3_address = base;
+                        linux_memory3_length = size;
+		}
+		lx_num ++;
+#endif
 
 		if (size == 0)
 			continue;
@@ -1235,6 +1276,10 @@ int __init early_init_dt_scan_chosen(unsigned long node, const char *uname,
 
 		/* try to clear seed so it won't be found. */
 		fdt_nop_property(initial_boot_params, node, "rng-seed");
+
+		/* update CRC check value */
+		of_fdt_crc32 = crc32_be(~0, initial_boot_params,
+				fdt_totalsize(initial_boot_params));
 	}
 
 	/* break now */
@@ -1339,6 +1384,8 @@ bool __init early_init_dt_verify(void *params)
 
 	/* Setup flat device-tree pointer */
 	initial_boot_params = params;
+	of_fdt_crc32 = crc32_be(~0, initial_boot_params,
+				fdt_totalsize(initial_boot_params));
 	return true;
 }
 
@@ -1352,7 +1399,9 @@ void __init early_init_dt_scan_nodes(void)
 	of_scan_flat_dt(early_init_dt_scan_root, NULL);
 
 	/* Setup memory, calling early_init_dt_add_memory_arch */
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 0)
 	of_scan_flat_dt(early_init_dt_scan_memory, NULL);
+#endif
 }
 
 bool __init early_init_dt_scan(void *params)
@@ -1364,8 +1413,6 @@ bool __init early_init_dt_scan(void *params)
 		return false;
 
 	early_init_dt_scan_nodes();
-	of_fdt_crc32 = crc32_be(~0, initial_boot_params,
-				fdt_totalsize(initial_boot_params));
 	return true;
 }
 

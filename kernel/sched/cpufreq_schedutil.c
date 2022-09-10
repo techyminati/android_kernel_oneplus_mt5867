@@ -16,6 +16,12 @@
 #include <linux/sched/cpufreq.h>
 #include <trace/events/power.h>
 
+#if defined(CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND) || defined(CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE) || defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL)
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+extern atomic_t disable_dvfs_reboot;
+#endif
+#endif
+
 struct sugov_tunables {
 	struct gov_attr_set	attr_set;
 	unsigned int		up_rate_limit_us;
@@ -130,6 +136,10 @@ static bool sugov_up_down_rate_limit(struct sugov_policy *sg_policy, u64 time,
 static bool sugov_update_next_freq(struct sugov_policy *sg_policy, u64 time,
 				   unsigned int next_freq)
 {
+#ifdef CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING
+	sg_policy->next_freq = sg_policy->policy->cur;
+#endif
+
 	if (sg_policy->next_freq == next_freq)
 		return false;
 

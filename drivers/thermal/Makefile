@@ -61,3 +61,10 @@ obj-$(CONFIG_MTK_THERMAL)	+= mtk_thermal.o
 obj-$(CONFIG_GENERIC_ADC_THERMAL)	+= thermal-generic-adc.o
 obj-$(CONFIG_ZX2967_THERMAL)	+= zx2967_thermal.o
 obj-$(CONFIG_UNIPHIER_THERMAL)	+= uniphier_thermal.o
+
+ifdef CONFIG_MSTAR_DVFS
+EXTRA_CFLAGS += -Idrivers/mstar2/drv/dvfs/include
+EXTRA_CFLAGS += -Idrivers/mstar2/include
+EXTRA_CFLAGS += -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/dvfs
+endif
+

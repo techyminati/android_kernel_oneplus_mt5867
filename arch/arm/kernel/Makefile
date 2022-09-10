@@ -14,6 +14,10 @@ endif
 
 CFLAGS_REMOVE_return_address.o = -pg
 
+EXTRA_CFLAGS	+=  -Idrivers/mstar2/include
+EXTRA_CFLAGS	+=  -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/cpu
+EXTRA_CFLAGS	+=  -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/cpu/arm
+
 # Object file lists.
 
 obj-y		:= elf.o entry-common.o irq.o opcodes.o \
@@ -86,6 +90,9 @@ endif
 obj-$(CONFIG_PARAVIRT)	+= paravirt.o
 
 head-y			:= head$(MMUEXT).o
+
+obj-$(CONFIG_MP_PLATFORM_MSTAR_LEGANCY_INTR)            += mstar_irq.o
+
 obj-$(CONFIG_DEBUG_LL)	+= debug.o
 obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
 

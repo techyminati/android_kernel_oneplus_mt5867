@@ -284,7 +284,7 @@ static inline void set_fs(mm_segment_t fs)
 #define user_addr_max() \
 	(uaccess_kernel() ? ~0UL : get_fs())
 
-#ifdef CONFIG_CPU_SPECTRE
+#if defined(CONFIG_CPU_SPECTRE) && !defined(CONFIG_KASAN)
 /*
  * When mitigating Spectre variant 1, it is not worth fixing the non-
  * verifying accessors, because we need to add verification of the
@@ -405,7 +405,7 @@ do {									\
 	__pu_err;							\
 })
 
-#ifdef CONFIG_CPU_SPECTRE
+#if defined(CONFIG_CPU_SPECTRE) && !defined(CONFIG_KASAN)
 /*
  * When mitigating Spectre variant 1.1, all accessors need to include
  * verification of the address space.

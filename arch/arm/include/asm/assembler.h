@@ -205,12 +205,129 @@
 /*
  * Get current thread_info.
  */
+#ifndef CONFIG_MP_IRQ_STACK
 	.macro	get_thread_info, rd
  ARM(	mov	\rd, sp, lsr #THREAD_SIZE_ORDER + PAGE_SHIFT	)
  THUMB(	mov	\rd, sp			)
  THUMB(	lsr	\rd, \rd, #THREAD_SIZE_ORDER + PAGE_SHIFT	)
 	mov	\rd, \rd, lsl #THREAD_SIZE_ORDER + PAGE_SHIFT
 	.endm
+#else
+	.macro	get_thread_info, el, rd
+	.if	\el == 0
+ ARM(   mov	\rd, sp, lsr #THREAD_SIZE_ORDER + PAGE_SHIFT	)
+ THUMB( mov	\rd, sp						)
+ THUMB( lsr	\rd, \rd, #THREAD_SIZE_ORDER + PAGE_SHIFT	)
+	mov	\rd, \rd, lsl #THREAD_SIZE_ORDER + PAGE_SHIF
+	.else
+	push	{r4-r6}
+	mrs	r6, cpsr	@ Irq Save
+	cpsid	i		@ Disable Irq
+	mrc	p15, 0, r4, c0, c0, 5
+#ifdef CONFIG_MP_IRQ_STACK_WITH_FCM
+	lsr	r4, r4, #8
+#endif
+	and	r4, r4, #0xff
+	ldr     r5, =sp_mtk
+	add	r5, r5, r4, lsl #2
+	ldr	r4, [r5]
+	msr	cpsr_c, r6	@ Irq Restore
+ ARM(   mov	\rd, r4, lsr #THREAD_SIZE_ORDER + PAGE_SHIFT	)
+ THUMB( mov	\rd, r4						)
+ THUMB( lsr	\rd, \rd, #THREAD_SIZE_ORDER + PAGE_SHIFT	)
+	mov	\rd, \rd, lsl #THREAD_SIZE_ORDER + PAGE_SHIFT
+	pop	{r4-r6}
+	.endif
+        .endm
+
+	.macro	__adldst_l, op, reg, sym, tmp
+	.if		__LINUX_ARM_ARCH__ < 7
+	ldr		\tmp, 111f
+	.subsection	1
+	.align		2
+111:	.long		\sym - (222f + 8)
+	.previous
+	.else
+	/*
+	 * In Thumb-2 builds, the PC bias depends on whether we are currently
+	 * emitting into a .arm or a .thumb section. So emit a nop and take
+	 * its size, so we can infer the execution mode and PC bias from it.
+	 */
+   ARM(	.set		.Lnopsize, 4			)
+ THUMB(	.pushsection	".discard.nop", "x", %note	)
+ THUMB(	111:		nop				)
+ THUMB(	.set		.Lnopsize, . - 111b		)
+ THUMB(	.popsection					)
+
+	movw		\tmp, #:lower16:\sym - (222f + 2 * .Lnopsize)
+	movt		\tmp, #:upper16:\sym - (222f + 2 * .Lnopsize)
+	.endif
+222:
+	.ifc		\op, add
+	add		\reg, \tmp, pc
+	.elseif		.Lnopsize == 2		@ Thumb-2 mode
+	add		\tmp, \tmp, pc
+	\op		\reg, [\tmp]
+	.else
+	\op		\reg, [pc, \tmp]
+	.endif
+	.endm
+
+	/*
+	 * adr_l - adr pseudo-op with unlimited range
+	 *
+	 * @dst: destination register
+	 * @sym: name of the symbol
+	 */
+	.macro		adr_l, dst:req, sym:req
+	__adldst_l	add, \dst, \sym, \dst
+	.endm
+
+
+	@ r4 - irq_stack[cpu_id]
+	@ r6 - sp of r4-r6
+	.macro	get_irq_stack
+	get_thread_info 1, tsk
+	ldr	r4, [tsk, #TI_CPU]
+	adr_l	r5, irq_stacks
+	mov	r6, #IRQ_STACK_SIZE
+	mla	r4, r4, r6, r5
+	.endm
+
+	.macro	irq_stack_entry
+	push	{r4-r6}
+	get_irq_stack
+	mov	r6, sp
+	add	sp, sp, #12
+	ldr	r5, [r4, #IRQ_COUNT]
+	cmp	r5, #0
+	bne	1f
+	str	sp, [r4, #IRQ_THREAD_SP]
+	ldr	r5, [r4, #IRQ_STACK]
+	mov	sp, r5
+	mov	r5, #0
+1:	add	r5, r5, #1
+	str	r5, [r4, #IRQ_COUNT]
+	ldmia	r6, {r4-r6}
+	.endm
+
+	.macro	irq_stack_exit
+	push	{r4-r6}
+	get_irq_stack
+	mov	r6, sp
+	add	sp, sp, #12
+	ldr	r5, [r4, #IRQ_COUNT]
+	sub	r5, r5, #1
+	cmp	r5, #0
+	bne	1f
+	str	sp, [r4, #IRQ_STACK]
+	ldr	r5, [r4, #IRQ_THREAD_SP]
+	mov	sp, r5
+	mov	r5, #0
+1:	str	r5, [r4, #IRQ_COUNT]
+	ldmia	r6, {r4-r6}
+	.endm
+#endif
 
 /*
  * Increment/decrement the preempt count.
@@ -229,7 +346,11 @@
 	.endm
 
 	.macro	dec_preempt_count_ti, ti, tmp
+#ifndef CONFIG_MP_IRQ_STACK
 	get_thread_info \ti
+#else
+	get_thread_info 1, \ti
+#endif
 	dec_preempt_count \ti, \tmp
 	.endm
 #else

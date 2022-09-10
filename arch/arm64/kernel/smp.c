@@ -60,9 +60,15 @@
 #include <asm/tlbflush.h>
 #include <asm/ptrace.h>
 #include <asm/virt.h>
+#ifdef CONFIG_MP_DEBUG_TOOL_SYSRQ
+#include <linux/nmi.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/ipi.h>
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+#include "mdrv_types.h"
+#endif
 
 DEFINE_PER_CPU_READ_MOSTLY(int, cpu_number);
 EXPORT_PER_CPU_SYMBOL(cpu_number);
@@ -83,7 +89,12 @@ enum ipi_msg_type {
 	IPI_CPU_CRASH_STOP,
 	IPI_TIMER,
 	IPI_IRQ_WORK,
+#ifdef CONFIG_MP_DEBUG_TOOL_SYSRQ
+	IPI_WAKEUP,
+	IPI_CPU_BACKTRACE
+#else
 	IPI_WAKEUP
+#endif
 };
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -281,7 +292,6 @@ int __cpu_disable(void)
 {
 	unsigned int cpu = smp_processor_id();
 	int ret;
-
 	ret = op_cpu_disable(cpu);
 	if (ret)
 		return ret;
@@ -764,6 +774,9 @@ static const char *ipi_types[NR_IPI] __tracepoint_string = {
 	S(IPI_TIMER, "Timer broadcast interrupts"),
 	S(IPI_IRQ_WORK, "IRQ work interrupts"),
 	S(IPI_WAKEUP, "CPU wake-up interrupts"),
+#ifdef CONFIG_MP_DEBUG_TOOL_SYSRQ
+	S(IPI_CPU_BACKTRACE, "CPU backtrace"),
+#endif
 };
 
 static void smp_cross_call(const struct cpumask *target, unsigned int ipinr)
@@ -898,6 +911,15 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 			unreachable();
 		}
 		break;
+#ifdef CONFIG_MP_DEBUG_TOOL_SYSRQ
+	case IPI_CPU_BACKTRACE:
+		printk_nmi_enter();
+		irq_enter();
+		nmi_cpu_backtrace(NULL);
+		irq_exit();
+		printk_nmi_exit();
+		break;
+#endif
 
 #ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
 	case IPI_TIMER:
@@ -1061,3 +1083,26 @@ bool cpus_are_stuck_in_kernel(void)
 
 	return !!cpus_stuck_in_kernel || smp_spin_tables;
 }
+
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+void smp_clear_magic(void)
+{
+	if (TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE) {
+		writel_relaxed(0x0, (void*)PAGE_OFFSET + 0x1004); //entry point put in 0x20201004
+		writel_relaxed(0x0, (void*)PAGE_OFFSET + 0x1000); //magic put in 0x20201000
+	}
+	__cpuc_flush_kern_all();
+}
+#endif
+
+#ifdef CONFIG_MP_DEBUG_TOOL_SYSRQ
+static void raise_nmi(cpumask_t *mask)
+{
+	smp_cross_call(mask, IPI_CPU_BACKTRACE);
+}
+
+void arch_trigger_cpumask_backtrace(const cpumask_t *mask, bool exclude_self)
+{
+	nmi_trigger_cpumask_backtrace(mask, exclude_self, raise_nmi);
+}
+#endif

@@ -4,6 +4,13 @@
 
 menu "Misc devices"
 
+config MTK_UART_MISC
+	tristate "mediatek uart misc driver"
+	default n
+	help
+	  If you say yes here, you can support piu uart switch and tx/rx enable function
+
+
 config SENSORS_LIS3LV02D
 	tristate
 	depends on INPUT

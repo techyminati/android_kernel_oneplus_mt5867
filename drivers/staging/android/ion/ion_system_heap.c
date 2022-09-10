@@ -18,10 +18,23 @@
 
 #define NUM_ORDERS ARRAY_SIZE(orders)
 
+#ifdef CONFIG_MP_MMA_ENABLE
+static gfp_t high_order_gfp_flags = (GFP_HIGHUSER | __GFP_NOWARN |
+				     __GFP_NORETRY) & ~__GFP_RECLAIM;
+static gfp_t low_order_gfp_flags  = (GFP_HIGHUSER);
+#else
 static gfp_t high_order_gfp_flags = (GFP_HIGHUSER | __GFP_ZERO | __GFP_NOWARN |
 				     __GFP_NORETRY) & ~__GFP_RECLAIM;
-static gfp_t low_order_gfp_flags  = GFP_HIGHUSER | __GFP_ZERO;
+static gfp_t low_order_gfp_flags  = (GFP_HIGHUSER | __GFP_ZERO);
+#endif
+#ifdef CONFIG_MP_CMA_PATCH_ION_LOW_ORDER_ALLOC
+static const unsigned int orders[] = {0};
+#elif defined(CONFIG_MP_MMA_ENABLE)
+static const unsigned int orders[] = {8, 4, 2, 1, 0};
+#else
 static const unsigned int orders[] = {8, 4, 0};
+#endif
+
 
 static int order_to_index(unsigned int order)
 {
@@ -44,6 +57,17 @@ struct ion_system_heap {
 	struct ion_page_pool *pools[NUM_ORDERS];
 };
 
+#if CONFIG_MP_MMA_UMA_WITH_NARROW
+static struct page *alloc_buffer_page(struct ion_system_heap *heap,
+				      struct ion_buffer *buffer,
+				      unsigned long order,
+				      unsigned long flags, bool new)
+{
+	struct ion_page_pool *pool = heap->pools[order_to_index(order)];
+
+	return ion_page_pool_alloc(pool, flags, new);
+}
+#else
 static struct page *alloc_buffer_page(struct ion_system_heap *heap,
 				      struct ion_buffer *buffer,
 				      unsigned long order)
@@ -52,7 +76,7 @@ static struct page *alloc_buffer_page(struct ion_system_heap *heap,
 
 	return ion_page_pool_alloc(pool);
 }
-
+#endif
 static void free_buffer_page(struct ion_system_heap *heap,
 			     struct ion_buffer *buffer, struct page *page)
 {
@@ -70,6 +94,32 @@ static void free_buffer_page(struct ion_system_heap *heap,
 	ion_page_pool_free(pool, page);
 }
 
+#if CONFIG_MP_MMA_UMA_WITH_NARROW
+static struct page *alloc_largest_available(struct ion_system_heap *heap,
+					    struct ion_buffer *buffer,
+					    unsigned long size,
+					    unsigned int max_order,
+					    unsigned long flags)
+{
+	struct page *page;
+	int i;
+
+	for (i = 0; i < NUM_ORDERS; i++) {
+		if (size < order_to_size(orders[i]))
+			continue;
+		if (max_order < orders[i])
+			continue;
+
+		page = alloc_buffer_page(heap, buffer, orders[i],flags, true);
+		if (!page)
+			continue;
+
+		return page;
+	}
+
+	return NULL;
+}
+#else
 static struct page *alloc_largest_available(struct ion_system_heap *heap,
 					    struct ion_buffer *buffer,
 					    unsigned long size,
@@ -93,7 +143,7 @@ static struct page *alloc_largest_available(struct ion_system_heap *heap,
 
 	return NULL;
 }
-
+#endif
 static int ion_system_heap_allocate(struct ion_heap *heap,
 				    struct ion_buffer *buffer,
 				    unsigned long size,
@@ -115,8 +165,13 @@ static int ion_system_heap_allocate(struct ion_heap *heap,
 
 	INIT_LIST_HEAD(&pages);
 	while (size_remaining > 0) {
+#if CONFIG_MP_MMA_UMA_WITH_NARROW
+		page = alloc_largest_available(sys_heap, buffer, size_remaining,
+					       max_order, flags);
+#else
 		page = alloc_largest_available(sys_heap, buffer, size_remaining,
 					       max_order);
+#endif
 		if (!page)
 			goto free_pages;
 		list_add_tail(&page->lru, &pages);
@@ -252,7 +307,11 @@ static int ion_system_heap_create_pools(struct ion_page_pool **pools)
 		struct ion_page_pool *pool;
 		gfp_t gfp_flags = low_order_gfp_flags;
 
+#ifdef CONFIG_MP_MMA_ENABLE
+		if (orders[i] > 0)
+#else
 		if (orders[i] > 4)
+#endif
 			gfp_flags = high_order_gfp_flags;
 
 		pool = ion_page_pool_create(gfp_flags, orders[i]);
@@ -297,6 +356,10 @@ int ion_system_heap_create(void)
 	if (IS_ERR(heap))
 		return PTR_ERR(heap);
 	heap->name = "ion_system_heap";
+#ifdef CONFIG_MSTAR_CHIP
+	pr_warn("%s, %d, mstar_ion patch, bind system heap id to 0\n", __func__, __LINE__);
+	heap->mst_hid = 0;
+#endif
 
 	ion_device_add_heap(heap);
 	return 0;
@@ -379,6 +442,10 @@ static struct ion_heap *__ion_system_contig_heap_create(void)
 	heap->ops = &kmalloc_ops;
 	heap->type = ION_HEAP_TYPE_SYSTEM_CONTIG;
 	heap->name = "ion_system_contig_heap";
+#ifdef CONFIG_MSTAR_CHIP
+	pr_warn("%s, %d, mstar_ion patch, bind system_contig heap id to 1\n", __func__, __LINE__);
+	heap->mst_hid = 1;
+#endif
 	return heap;
 }
 

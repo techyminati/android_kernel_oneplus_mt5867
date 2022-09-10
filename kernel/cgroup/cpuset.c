@@ -135,6 +135,11 @@ struct cpuset {
 
 	/* for custom sched domain */
 	int relax_domain_level;
+
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+	/* for memory region idx */
+	int memalloc_idx;
+#endif
 };
 
 static inline struct cpuset *css_cs(struct cgroup_subsys_state *css)
@@ -176,6 +181,9 @@ typedef enum {
 	CS_SCHED_LOAD_BALANCE,
 	CS_SPREAD_PAGE,
 	CS_SPREAD_SLAB,
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+	CS_MEMORY_ALLOCATOR_IDX,
+#endif
 } cpuset_flagbits_t;
 
 /* convenient tests for these bits */
@@ -1292,6 +1300,27 @@ static int update_relax_domain_level(struct cpuset *cs, s64 val)
 	return 0;
 }
 
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+static int update_memory_allocator_idx(struct cpuset *cs, s64 val)
+{
+	struct css_task_iter it;
+	struct task_struct *task;
+
+	if (val < 0 && val >= MEMALLOC_NUMBER)
+		return -EINVAL;
+
+	if (val != cs->memalloc_idx) {
+		cs->memalloc_idx = val;
+	}
+
+	css_task_iter_start(&cs->css, 0, &it);
+	while ((task = css_task_iter_next(&it)))
+		set_memalloc_idx(task, cs->memalloc_idx);
+	css_task_iter_end(&it);
+
+	return 0;
+}
+#endif
 /**
  * update_tasks_flags - update the spread flags of tasks in the cpuset.
  * @cs: the cpuset in which each task's spread flags needs to be changed
@@ -1556,6 +1585,9 @@ static void cpuset_attach(struct cgroup_taskset *tset)
 
 		cpuset_change_task_nodemask(task, &cpuset_attach_nodemask_to);
 		cpuset_update_task_spread_flag(cs, task);
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+		set_memalloc_idx(task, cs->memalloc_idx);
+#endif
 	}
 
 	/*
@@ -1611,6 +1643,9 @@ typedef enum {
 	FILE_MEMORY_PRESSURE,
 	FILE_SPREAD_PAGE,
 	FILE_SPREAD_SLAB,
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+	FILE_MEMORY_ALLOCATOR_IDX,
+#endif
 } cpuset_filetype_t;
 
 static int cpuset_write_u64(struct cgroup_subsys_state *css, struct cftype *cft,
@@ -1675,6 +1710,11 @@ static int cpuset_write_s64(struct cgroup_subsys_state *css, struct cftype *cft,
 	case FILE_SCHED_RELAX_DOMAIN_LEVEL:
 		retval = update_relax_domain_level(cs, val);
 		break;
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+	case FILE_MEMORY_ALLOCATOR_IDX:
+		retval = update_memory_allocator_idx(cs, val);
+		break;
+#endif
 	default:
 		retval = -EINVAL;
 		break;
@@ -1825,6 +1865,10 @@ static s64 cpuset_read_s64(struct cgroup_subsys_state *css, struct cftype *cft)
 	switch (type) {
 	case FILE_SCHED_RELAX_DOMAIN_LEVEL:
 		return cs->relax_domain_level;
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+	case FILE_MEMORY_ALLOCATOR_IDX:
+		return cs->memalloc_idx;
+#endif
 	default:
 		BUG();
 	}
@@ -1937,6 +1981,14 @@ static struct cftype files[] = {
 		.private = FILE_MEMORY_PRESSURE_ENABLED,
 	},
 
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+	{
+		.name = "memory_allocator_idx",
+		.read_s64 = cpuset_read_s64,
+		.write_s64 = cpuset_write_s64,
+		.private = FILE_MEMORY_ALLOCATOR_IDX,
+	},
+#endif
 	{ }	/* terminate */
 };
 
@@ -1971,6 +2023,9 @@ cpuset_css_alloc(struct cgroup_subsys_state *parent_css)
 	nodes_clear(cs->effective_mems);
 	fmeter_init(&cs->fmeter);
 	cs->relax_domain_level = -1;
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+	cs->memalloc_idx = 0;
+#endif
 
 	return &cs->css;
 
@@ -2148,7 +2203,9 @@ int __init cpuset_init(void)
 	fmeter_init(&top_cpuset.fmeter);
 	set_bit(CS_SCHED_LOAD_BALANCE, &top_cpuset.flags);
 	top_cpuset.relax_domain_level = -1;
-
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+	top_cpuset.memalloc_idx = 0;
+#endif
 	err = register_filesystem(&cpuset_fs_type);
 	if (err < 0)
 		return err;

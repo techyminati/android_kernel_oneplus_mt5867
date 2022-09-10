@@ -434,6 +434,7 @@ config STACKPROTECTOR
 	depends on HAVE_STACKPROTECTOR
 	depends on $(cc-option,-fstack-protector)
 	default y
+	select STACKPROTECTOR_STRONG if $(cc-option,-fstack-protector-strong)
 	help
 	  This option turns on the "stack-protector" GCC feature. This
 	  feature puts, at the beginning of functions, a canary value on

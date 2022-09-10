@@ -168,6 +168,20 @@ extern void post_alloc_hook(struct page *page, unsigned int order,
 					gfp_t gfp_flags);
 extern int user_min_free_kbytes;
 
+#if defined(CONFIG_MP_CMA_PATCH_MIGRATION_FILTER) || defined(CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE)
+#ifdef CONFIG_CMA
+static inline int is_cma_page(struct page *page)
+{
+	unsigned mt = get_pageblock_migratetype(page);
+	if (mt == MIGRATE_ISOLATE || mt == MIGRATE_CMA)
+		return true;
+	return false;
+}
+#else
+#define is_cma_page(page) 0
+#endif
+#endif
+
 #if defined CONFIG_COMPACTION || defined CONFIG_CMA
 
 /*
@@ -494,6 +508,15 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 #define ALLOC_HIGH		0x20 /* __GFP_HIGH set */
 #define ALLOC_CPUSET		0x40 /* check for correct cpuset */
 #define ALLOC_CMA		0x80 /* allow allocations from CMA areas */
+
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+#include <linux/stacktrace.h>
+#include <linux/memblock.h>
+void notify_free_page(struct page *page, int count);
+void notify_alloc_page(struct page *page, int count, gfp_t gfp_mask);
+void notify_migrate_page(struct page *page_src, struct page *page_dst);
+void show_page_trace_statics(void);
+#endif
 
 enum ttu_flags;
 struct tlbflush_unmap_batch;

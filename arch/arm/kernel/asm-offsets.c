@@ -21,6 +21,9 @@
 #include <asm/glue-df.h>
 #include <asm/glue-pf.h>
 #include <asm/mach/arch.h>
+#ifdef CONFIG_MP_IRQ_STACK
+#include <asm/irq.h>
+#endif
 #include <asm/thread_info.h>
 #include <asm/memory.h>
 #include <asm/mpu.h>
@@ -78,6 +81,12 @@ int main(void)
 #endif
 #ifdef CONFIG_CRUNCH
   DEFINE(TI_CRUNCH_STATE,	offsetof(struct thread_info, crunchstate));
+#endif
+#ifdef CONFIG_MP_IRQ_STACK
+  DEFINE(IRQ_STACK,		offsetof(struct irq_stack, stack));
+  DEFINE(IRQ_THREAD_SP,		offsetof(struct irq_stack, thread_sp));
+  DEFINE(IRQ_COUNT,		offsetof(struct irq_stack, count));
+  DEFINE(IRQ_STACK_SIZE,	sizeof(struct irq_stack));
 #endif
   BLANK();
   DEFINE(S_R0,			offsetof(struct pt_regs, ARM_r0));

@@ -159,6 +159,34 @@ void show_stack(struct task_struct *tsk, unsigned long *sp)
 	barrier();
 }
 
+unsigned int dump_system_info_ctrl = 0xFF; // verbose by default
+static void dump_task(struct task_struct *tsk)
+{
+	dump_backtrace(NULL, tsk);
+}
+
+void dump_system_info(void)
+{
+	struct task_struct *pTask, *pTmp;
+
+	console_verbose();
+	do_each_thread(pTask, pTmp)
+	{
+		if (dump_system_info_ctrl & 0x1)
+		{
+			dump_task(pTmp);
+		}
+		else
+		{
+			if (pTmp->state == TASK_RUNNING)
+			{
+				dump_task(pTmp);
+			}
+		}
+	} while_each_thread(pTask, pTmp);
+}
+EXPORT_SYMBOL(dump_system_info);
+
 #ifdef CONFIG_PREEMPT
 #define S_PREEMPT " PREEMPT"
 #else

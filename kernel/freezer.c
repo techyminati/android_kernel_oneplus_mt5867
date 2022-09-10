@@ -50,7 +50,11 @@ bool freezing_slow_path(struct task_struct *p)
 	if (pm_nosig_freezing || cgroup_freezing(p))
 		return true;
 
-	if (pm_freezing && !(p->flags & PF_KTHREAD))
+	if (pm_freezing && !(p->flags & PF_KTHREAD)
+#ifdef CONFIG_MP_MSTAR_STR_PROCESS_FREEZE_LATE
+                             && (!(p->flags & PF_FREEZE_LATE))
+#endif
+            )
 		return true;
 
 	return false;

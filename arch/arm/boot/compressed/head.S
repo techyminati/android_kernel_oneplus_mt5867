@@ -775,7 +775,11 @@ __armv7_mmu_cache_on:
 		movne	r6, #CB_BITS | 0x02	@ !XN
 		blne	__setup_mmu
 		mov	r0, #0
+#ifdef CONFIG_MSTAR_CHIP
+		dsb                             @ data synchronization barrier
+#else
 		mcr	p15, 0, r0, c7, c10, 4	@ drain write buffer
+#endif
 		tst	r11, #0xf		@ VMSA
 		mcrne	p15, 0, r0, c8, c7, 0	@ flush I,D TLBs
 #endif
@@ -797,11 +801,19 @@ __armv7_mmu_cache_on:
 		mcrne	p15, 0, r1, c3, c0, 0	@ load domain access control
 		mcrne   p15, 0, r6, c2, c0, 2   @ load ttb control
 #endif
+#ifdef CONFIG_MSTAR_CHIP
+		isb                             @ instruction synchronzation barrier
+#else
 		mcr	p15, 0, r0, c7, c5, 4	@ ISB
+#endif
 		mcr	p15, 0, r0, c1, c0, 0	@ load control register
 		mrc	p15, 0, r0, c1, c0, 0	@ and read it back
 		mov	r0, #0
+#ifdef CONFIG_MSTAR_CHIP
+		isb                             @ instruction synchronzation barrier
+#else
 		mcr	p15, 0, r0, c7, c5, 4	@ ISB
+#endif
 		mov	pc, r12
 
 __fa526_cache_on:
@@ -923,7 +935,7 @@ proc_types:
 		W(b)	__armv3_mpu_cache_on
 		W(b)	__armv3_mpu_cache_off
 		W(b)	__armv3_mpu_cache_flush
-		
+
 		.word	0x41009400		@ ARM94x
 		.word	0xff00ff00
 		W(b)	__armv4_mpu_cache_on
@@ -1102,8 +1114,13 @@ __armv7_mmu_cache_off:
 		mcr	p15, 0, r0, c8, c7, 0	@ invalidate whole TLB
 #endif
 		mcr	p15, 0, r0, c7, c5, 6	@ invalidate BTC
+#ifdef CONFIG_MSTAR_CHIP
+		dsb                             @ data synchronization barrier
+		isb                             @ instruction synchronization barrier
+#else
 		mcr	p15, 0, r0, c7, c10, 4	@ DSB
 		mcr	p15, 0, r0, c7, c5, 4	@ ISB
+#endif
 		mov	pc, r12
 
 /*
@@ -1137,7 +1154,7 @@ __armv4_mpu_cache_flush:
 		mcrne	p15, 0, ip, c7, c5, 0	@ invalidate I cache
 		mcr	p15, 0, ip, c7, c10, 4	@ drain WB
 		mov	pc, lr
-		
+
 __fa526_cache_flush:
 		tst	r4, #1
 		movne	pc, lr
@@ -1212,10 +1229,19 @@ finished:
 		mov	r10, #0			@ switch back to cache level 0
 		mcr	p15, 2, r10, c0, c0, 0	@ select current cache level in cssr
 iflush:
+#ifdef CONFIG_MSTAR_CHIP
+		dsb                             @ data synchronization barrier
+#else
 		mcr	p15, 0, r10, c7, c10, 4	@ DSB
+#endif
 		mcr	p15, 0, r10, c7, c5, 0	@ invalidate I+BTB
+#ifdef CONFIG_MSTAR_CHIP
+		dsb                             @ data synchronization barrier
+		isb                             @ instruction synchronization barrier
+#else
 		mcr	p15, 0, r10, c7, c10, 4	@ DSB
 		mcr	p15, 0, r10, c7, c5, 4	@ ISB
+#endif
 		mov	pc, lr
 
 __armv5tej_mmu_cache_flush:

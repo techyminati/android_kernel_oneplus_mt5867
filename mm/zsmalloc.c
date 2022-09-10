@@ -458,7 +458,11 @@ MODULE_ALIAS("zpool-zsmalloc");
 
 /* per-cpu VM mapping areas for zspage accesses that cross page boundaries */
 static DEFINE_PER_CPU(struct mapping_area, zs_map_area);
-
+#ifdef CONFIG_MP_MZCCMDQ_HW_SPLIT
+DEFINE_PER_CPU(unsigned long, addr1);
+DEFINE_PER_CPU(unsigned long, addr2);
+DEFINE_PER_CPU(unsigned long, dec_is_mzc);
+#endif
 static bool is_zspage_isolated(struct zspage *zspage)
 {
 	return zspage->isolated;
@@ -877,10 +881,22 @@ static void obj_to_location(unsigned long obj, struct page **page,
 static unsigned long location_to_obj(struct page *page, unsigned int obj_idx)
 {
 	unsigned long obj;
+#ifdef CONFIG_MSTAR_CHIP
+	struct page *_page;
+	unsigned int _obj_idx;
+#endif
 
 	obj = page_to_pfn(page) << OBJ_INDEX_BITS;
 	obj |= obj_idx & OBJ_INDEX_MASK;
 	obj <<= OBJ_TAG_BITS;
+#ifdef CONFIG_MSTAR_CHIP
+	obj_to_location(obj, &_page, &_obj_idx);
+	if (_obj_idx != obj_idx || _page != page) {
+		pr_err("original: page = %lx, obj_idx = %x, obj = %lx\n", (unsigned long)page, obj_idx, obj);
+		pr_err("wrong translation: _page = %lx, _obj_idx = %x, obj = %lx\n", (unsigned long)_page, _obj_idx, obj);
+		WARN_ON(1);
+	}
+#endif
 
 	return obj;
 }
@@ -903,6 +919,7 @@ static inline int testpin_tag(unsigned long handle)
 {
 	return bit_spin_is_locked(HANDLE_PIN_BIT, (unsigned long *)handle);
 }
+
 
 static inline int trypin_tag(unsigned long handle)
 {
@@ -950,6 +967,11 @@ unlock:
 	return 0;
 }
 
+#ifdef CONFIG_ZRAM_OVER_GENPOOL
+extern struct page* alloc_reserve_page(void);
+extern void free_reserve_page(const struct page *page);
+extern int is_reserve_page(const struct page *page);
+#endif
 static void __free_zspage(struct zs_pool *pool, struct size_class *class,
 				struct zspage *zspage)
 {
@@ -971,7 +993,18 @@ static void __free_zspage(struct zs_pool *pool, struct size_class *class,
 		reset_page(page);
 		unlock_page(page);
 		dec_zone_page_state(page, NR_ZSPAGES);
+#ifdef CONFIG_ZRAM_OVER_GENPOOL
+		if (page_count(page) != 1) {
+			printk(KERN_ALERT "%s: __free_zspage: page_count:%d\n", __func__, page_count(page));
+		}
+		if (is_reserve_page(page)) {
+			free_reserve_page(page);
+		}
+		else
+			put_page(page);
+#else
 		put_page(page);
+#endif
 		page = next;
 	} while (page != NULL);
 
@@ -1096,11 +1129,27 @@ static struct zspage *alloc_zspage(struct zs_pool *pool,
 	for (i = 0; i < class->pages_per_zspage; i++) {
 		struct page *page;
 
+#ifdef CONFIG_ZRAM_OVER_GENPOOL
+		page = alloc_reserve_page();
+		if (!page)
+			page = alloc_page(gfp);
+		if (page && page_count(page) != 1) {
+			printk(KERN_ALERT "%s: alloc_page: page_count:%d\n", __func__, page_count(page));
+		}
+#else
 		page = alloc_page(gfp);
+#endif
 		if (!page) {
 			while (--i >= 0) {
 				dec_zone_page_state(pages[i], NR_ZSPAGES);
+#ifdef CONFIG_ZRAM_OVER_GENPOOL
+				if (is_reserve_page(pages[i]))
+					free_reserve_page(pages[i]);
+				else
+					__free_page(pages[i]);
+#else
 				__free_page(pages[i]);
+#endif
 			}
 			cache_free_zspage(pool, zspage);
 			return NULL;
@@ -1209,14 +1258,43 @@ static void *__zs_map_object(struct mapping_area *area,
 	sizes[1] = size - sizes[0];
 
 	/* copy object to per-cpu buffer */
-	addr = kmap_atomic(pages[0]);
-	memcpy(buf, addr + off, sizes[0]);
-	kunmap_atomic(addr);
-	addr = kmap_atomic(pages[1]);
-	memcpy(buf + sizes[0], addr, sizes[1]);
-	kunmap_atomic(addr);
+#ifdef CONFIG_MP_MZCCMDQ_HW_SPLIT
+	unsigned long is_mzc = get_cpu_var(dec_is_mzc);
+	put_cpu_var(dec_is_mzc);
+	if (is_mzc)
+	{
+    	unsigned long *in_addr1 = &get_cpu_var(addr1);
+		unsigned long *in_addr2 = &get_cpu_var(addr2);
+#ifdef CONFIG_ARM
+		*in_addr1 = kmap_atomic(pages[0]) + off;
+		*in_addr2 = kmap_atomic(pages[1]);
+#else
+		*in_addr1 = page_to_virt(pages[0]) + off;
+		*in_addr2 = page_to_virt(pages[1]);
+#endif
+		put_cpu_var(addr1);
+		put_cpu_var(addr2);
+	}
+	else
+#endif
+	{
+		addr = kmap_atomic(pages[0]);
+		memcpy(buf, addr + off, sizes[0]);
+		kunmap_atomic(addr);
+		addr = kmap_atomic(pages[1]);
+		memcpy(buf + sizes[0], addr, sizes[1]);
+		kunmap_atomic(addr);
+	}
+
 out:
+#ifdef CONFIG_MP_MZCCMDQ_HW_SPLIT
+	if (area->vm_mm == ZS_MM_WO || !is_mzc)
+		return area->vm_buf;
+	else
+		return NULL;
+#else
 	return area->vm_buf;
+#endif
 }
 
 static void __zs_unmap_object(struct mapping_area *area,
@@ -1247,6 +1325,24 @@ static void __zs_unmap_object(struct mapping_area *area,
 	kunmap_atomic(addr);
 
 out:
+
+#if defined(CONFIG_MP_MZCCMDQ_HW_SPLIT) && defined(CONFIG_ARM)
+	if (area->vm_mm == ZS_MM_RO)
+	{
+		unsigned long *in_addr1 = &get_cpu_var(addr1);
+		unsigned long *in_addr2 = &get_cpu_var(addr2);
+		unsigned long is_mzc = get_cpu_var(dec_is_mzc);
+		if (is_mzc)
+		{
+			kunmap_atomic(*in_addr1);
+			kunmap_atomic(*in_addr2);
+		}	
+		put_cpu_var(addr1);
+		put_cpu_var(addr2);
+		put_cpu_var(dec_is_mzc);					
+	}
+#endif
+
 	/* enable page faults to match kunmap_atomic() return conditions */
 	pagefault_enable();
 }
@@ -1256,7 +1352,6 @@ out:
 static int zs_cpu_prepare(unsigned int cpu)
 {
 	struct mapping_area *area;
-
 	area = &per_cpu(zs_map_area, cpu);
 	return __zs_cpu_up(area);
 }
@@ -1264,7 +1359,6 @@ static int zs_cpu_prepare(unsigned int cpu)
 static int zs_cpu_dead(unsigned int cpu)
 {
 	struct mapping_area *area;
-
 	area = &per_cpu(zs_map_area, cpu);
 	__zs_cpu_down(area);
 	return 0;
@@ -1341,12 +1435,11 @@ void *zs_map_object(struct zs_pool *pool, unsigned long handle,
 	get_zspage_mapping(zspage, &class_idx, &fg);
 	class = pool->size_class[class_idx];
 	off = (class->size * obj_idx) & ~PAGE_MASK;
-
 	area = &get_cpu_var(zs_map_area);
 	area->vm_mm = mm;
 	if (off + class->size <= PAGE_SIZE) {
 		/* this object is contained entirely within a page */
-		area->vm_addr = kmap_atomic(page);
+    	area->vm_addr = kmap_atomic(page);
 		ret = area->vm_addr + off;
 		goto out;
 	}
@@ -1358,9 +1451,25 @@ void *zs_map_object(struct zs_pool *pool, unsigned long handle,
 
 	ret = __zs_map_object(area, pages, off, class->size);
 out:
+#ifdef CONFIG_MP_MZCCMDQ_HW_SPLIT
 	if (likely(!PageHugeObject(page)))
+    {
+      if (ret == NULL)
+      {
+          unsigned long *in_addr1 = &get_cpu_var(addr1);
+		  *in_addr1 += ZS_HANDLE_SIZE;
+		  put_cpu_var(addr1);
+      }
+      else
+      {
+        	ret += ZS_HANDLE_SIZE;
+      }
+    }
+#else
+	if (likely(!PageHugeObject(page))) {
 		ret += ZS_HANDLE_SIZE;
-
+	}
+#endif
 	return ret;
 }
 EXPORT_SYMBOL_GPL(zs_map_object);
@@ -1397,7 +1506,6 @@ void zs_unmap_object(struct zs_pool *pool, unsigned long handle)
 		__zs_unmap_object(area, pages, off, class->size);
 	}
 	put_cpu_var(zs_map_area);
-
 	migrate_read_unlock(zspage);
 	unpin_tag(handle);
 }
@@ -2098,7 +2206,18 @@ static int zs_page_migrate(struct address_space *mapping, struct page *newpage,
 	}
 
 	reset_page(page);
+#ifdef CONFIG_ZRAM_OVER_GENPOOL
+	if (page_count(page) != 1) {
+		printk(KERN_ALERT "%s: zs_page_migrate: page_count:%d\n", __func__, page_count(page));
+	}
+	if (is_reserve_page(page)) {
+		free_reserve_page(page);
+	}
+	else
+		put_page(page);
+#else
 	put_page(page);
+#endif
 	page = newpage;
 
 	ret = MIGRATEPAGE_SUCCESS;

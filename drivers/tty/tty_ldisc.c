@@ -19,6 +19,7 @@
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
 #include <linux/ratelimit.h>
+#include <mstar/mpatch_macro.h>
 
 #undef LDISC_DEBUG_HANGUP
 
@@ -40,6 +41,7 @@ enum {
  *	must be taken with irqs off because there are hangup path
  *	callers who will do ldisc lookups and cannot sleep.
  */
+
 
 static DEFINE_RAW_SPINLOCK(tty_ldiscs_lock);
 /* Line disc dispatch table */
@@ -771,7 +773,10 @@ void tty_ldisc_hangup(struct tty_struct *tty, bool reinit)
 
 int tty_ldisc_setup(struct tty_struct *tty, struct tty_struct *o_tty)
 {
-	int retval = tty_ldisc_open(tty, tty->ldisc);
+	struct tty_ldisc *ld = tty->ldisc;
+	int retval;
+
+	retval = tty_ldisc_open(tty, ld);
 	if (retval)
 		return retval;
 

@@ -30,6 +30,8 @@
 #include "pnode.h"
 #include "internal.h"
 
+#include<linux/ktime.h>
+
 /* Maximum number of mounts in a mount namespace */
 unsigned int sysctl_mount_max __read_mostly = 100000;
 
@@ -3020,6 +3022,11 @@ int ksys_mount(char __user *dev_name, char __user *dir_name, char __user *type,
 	char *kernel_type;
 	char *kernel_dev;
 	void *options;
+	ktime_t calltime, delta, rettime;
+	unsigned long long duration;
+
+	//get current time
+	calltime = ktime_get();
 
 	kernel_type = copy_mount_string(type);
 	ret = PTR_ERR(kernel_type);
@@ -3044,6 +3051,22 @@ out_data:
 out_dev:
 	kfree(kernel_type);
 out_type:
+	rettime = ktime_get();
+	delta = ktime_sub(rettime,calltime);
+	duration = (unsigned long long) ktime_to_ns(delta) >> 10;//mirco sec
+	//print out debug message if mount time > 1.5s
+	if(duration > 1500000){
+		if (flags & MS_REMOUNT)
+			printk(KERN_DEBUG "[SYS_MOUNT] detect long remount mount time (%lld us)\n", duration);
+		else if (flags & MS_BIND)
+			printk(KERN_DEBUG "[SYS_MOUNT] detect long bind mount time (%lld us)\n", duration);
+		else if (flags & (MS_SHARED | MS_PRIVATE | MS_SLAVE | MS_UNBINDABLE)){
+		}
+		else if (flags & MS_MOVE){
+		}
+		else
+			printk(KERN_DEBUG "[SYS_MOUNT] detect long new mount time (%lld us)\n", duration);
+	}
 	return ret;
 }
 

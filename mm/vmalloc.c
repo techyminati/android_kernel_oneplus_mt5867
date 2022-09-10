@@ -38,6 +38,12 @@
 
 #include "internal.h"
 
+#include <mstar/mpatch_macro.h>
+#ifdef CONFIG_MP_CMA_PATCH_VM_UNMAP
+unsigned long unmap_watermark = 8 * 1024 * 1024 / PAGE_SIZE; // 8 MB
+atomic_t unmap_count = ATOMIC_INIT(0);
+#endif
+
 struct vfree_deferred {
 	struct llist_head list;
 	struct work_struct wq;
@@ -116,7 +122,11 @@ static void vunmap_p4d_range(pgd_t *pgd, unsigned long addr, unsigned long end)
 	} while (p4d++, addr = next, addr != end);
 }
 
+#ifdef CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL
+void vunmap_page_range(unsigned long addr, unsigned long end)
+#else
 static void vunmap_page_range(unsigned long addr, unsigned long end)
+#endif
 {
 	pgd_t *pgd;
 	unsigned long next;
@@ -235,8 +245,13 @@ static int vmap_page_range_noflush(unsigned long start, unsigned long end,
 	return nr;
 }
 
+#ifdef CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL
+int vmap_page_range(unsigned long start, unsigned long end,
+			   pgprot_t prot, struct page **pages)
+#else
 static int vmap_page_range(unsigned long start, unsigned long end,
 			   pgprot_t prot, struct page **pages)
+#endif
 {
 	int ret;
 
@@ -663,8 +678,17 @@ void set_iounmap_nonlazy(void)
 /*
  * Purges all lazily-freed vmap areas.
  */
+
+#if defined(CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL)
+static DEFINE_SPINLOCK(purge_lock);
+#endif
+
 static bool __purge_vmap_area_lazy(unsigned long start, unsigned long end)
 {
+#if !defined(CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL)
+#else
+	static DEFINE_SPINLOCK(purge_lock);
+#endif
 	struct llist_node *valist;
 	struct vmap_area *va;
 	struct vmap_area *n_va;
@@ -697,6 +721,32 @@ static bool __purge_vmap_area_lazy(unsigned long start, unsigned long end)
 	spin_unlock(&vmap_area_lock);
 	return true;
 }
+
+#ifdef CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL
+int sysctl_lazy_vfree_tlb_flush_all_threshold = SZ_512M;
+static void __purge_vmap_area_lazy_simple(unsigned long start, unsigned long end)
+{
+	int nr = 0;
+
+	nr = (end - start) >> PAGE_SHIFT;
+
+	/*
+	 * If sync is 0 but force_flush is 1, we'll go sync anyway but callers
+	 * should not expect such behaviour. This just simplifies locking for
+	 * the case that isn't actually used at the moment anyway.
+	 */
+
+	if (!spin_trylock(&purge_lock))
+		return;
+
+	if (nr > (sysctl_lazy_vfree_tlb_flush_all_threshold >> PAGE_SHIFT))
+		flush_tlb_all();
+	else
+		flush_tlb_kernel_range(start, end);
+
+	spin_unlock(&purge_lock);
+}
+#endif
 
 /*
  * Kick off a purge of the outstanding lazy areas. Don't bother if somebody
@@ -763,6 +813,15 @@ static struct vmap_area *find_vmap_area(unsigned long addr)
 
 	return va;
 }
+
+#ifdef CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL
+void free_unmap_vmap_start_end(unsigned long start,unsigned long end)
+{
+	flush_cache_vunmap(start, end);
+	vunmap_page_range(start, end);
+	__purge_vmap_area_lazy_simple(start, end);
+}
+#endif
 
 /*** Per cpu kva allocator ***/
 
@@ -896,6 +955,9 @@ static void *new_vmap_block(unsigned int order, gfp_t gfp_mask)
 	INIT_LIST_HEAD(&vb->free_list);
 
 	vb_idx = addr_to_vb_idx(va->va_start);
+#ifdef CONFIG_MP_CMA_PATCH_VM_UNMAP
+	atomic_add(1, &unmap_count);
+#endif
 	spin_lock(&vmap_block_tree_lock);
 	err = radix_tree_insert(&vmap_block_tree, vb_idx, vb);
 	spin_unlock(&vmap_block_tree_lock);
@@ -917,6 +979,9 @@ static void free_vmap_block(struct vmap_block *vb)
 	unsigned long vb_idx;
 
 	vb_idx = addr_to_vb_idx(vb->va->va_start);
+#ifdef CONFIG_MP_CMA_PATCH_VM_UNMAP
+	atomic_sub(1, &unmap_count);
+#endif
 	spin_lock(&vmap_block_tree_lock);
 	tmp = radix_tree_delete(&vmap_block_tree, vb_idx);
 	spin_unlock(&vmap_block_tree_lock);
@@ -1139,6 +1204,10 @@ void vm_unmap_ram(const void *mem, unsigned int count)
 	BUG_ON(addr > VMALLOC_END);
 	BUG_ON(!PAGE_ALIGNED(addr));
 
+#ifdef CONFIG_MP_CMA_PATCH_VM_UNMAP
+	if(atomic_read(&unmap_count) > unmap_watermark)
+		vm_unmap_aliases();
+#endif
 	if (likely(count <= VMAP_MAX_ALLOC)) {
 		debug_check_no_locks_freed(mem, size);
 		vb_free(mem, size);
@@ -1454,6 +1523,9 @@ struct vm_struct *get_vm_area_caller(unsigned long size, unsigned long flags,
 	return __get_vm_area_node(size, 1, flags, VMALLOC_START, VMALLOC_END,
 				  NUMA_NO_NODE, GFP_KERNEL, caller);
 }
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+EXPORT_SYMBOL(get_vm_area_caller);
+#endif
 
 /**
  *	find_vm_area  -  find a continuous kernel virtual area

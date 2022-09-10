@@ -249,7 +249,12 @@ static int unwind_pop_register(struct unwind_ctrl_block *ctrl,
 		if (*vsp >= (unsigned long *)ctrl->sp_high)
 			return -URC_FAILURE;
 
+#ifdef CONFIG_KASAN
+	ctrl->vrs[reg] = READ_ONCE_NOCHECK(*(*vsp));
+	(*vsp)++;
+#else
 	ctrl->vrs[reg] = *(*vsp)++;
+#endif
 	return URC_OK;
 }
 

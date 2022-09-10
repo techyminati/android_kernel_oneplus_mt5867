@@ -28,8 +28,19 @@
 #define MICRO_FREQUENCY_MIN_SAMPLE_RATE		(10000)
 #define MIN_FREQUENCY_UP_THRESHOLD		(1)
 #define MAX_FREQUENCY_UP_THRESHOLD		(100)
+#define DEF_BOOST_CONSTRAIN			(300)
 
 static struct od_ops od_ops;
+
+#if defined(CONFIG_MP_DVFS_CPUHOTPLUG_USE_ONLINE_CPU_MAX_LOAD) && defined(CONFIG_MSTAR_DVFS)
+#include <mdrv_CPU_cluster_calibrating.h>
+extern struct mutex mstar_cpuload_lock;
+extern unsigned int mstar_cpu_load_freq[CONFIG_NR_CPUS];
+extern struct mstar_cpufreq_policy ondemand_timer[CONFIG_NR_CPUS];
+#elif defined(CONFIG_ARM_MTKTV_CPUFREQ)
+DEFINE_MUTEX(mtktv_cpuload_lock);
+unsigned int mtktv_cpu_load_freq[CONFIG_NR_CPUS];
+#endif
 
 static unsigned int default_powersave_bias;
 
@@ -141,15 +152,68 @@ static void od_update(struct cpufreq_policy *policy)
 	struct dbs_data *dbs_data = policy_dbs->dbs_data;
 	struct od_dbs_tuners *od_tuners = dbs_data->tuners;
 	unsigned int load = dbs_update(policy);
+	unsigned int total_load = 0;
+	unsigned int max_index = 0, cur_index = 0;
+	struct cpufreq_frequency_table *freq_table = policy->freq_table;
 
 	dbs_info->freq_lo = 0;
+
+#if defined(CONFIG_MP_DVFS_CPUHOTPLUG_USE_ONLINE_CPU_MAX_LOAD) && defined(CONFIG_MSTAR_DVFS)
+	int i, j = 0;
+	int cpu = policy->cpu;
+	unsigned int mstar_load_freq = 0;
+	if(cpu == ondemand_timer[cpu].cluster_m)    // for cluster_head, use max_cpu_load_freq among all online cpus of same cluster
+	{
+		mutex_lock(&mstar_cpuload_lock);
+		for_each_online_cpu(i)
+		{
+			if(cpu != ondemand_timer[i].cluster_m)	// we only take cpu_load of the cpu belonged to my_cluster into consideration
+				continue;
+			//printk("\033[35mFunction = %s, Line = %d, cpu%d reference cpu%d\033[m\n", __PRETTY_FUNCTION__, __LINE__, cpu, i);
+			if(mstar_load_freq < mstar_cpu_load_freq[i])
+			{
+				j = i;
+				mstar_load_freq = mstar_cpu_load_freq[i];
+			}
+			total_load += mstar_cpu_load_freq[i];
+		}
+		mutex_unlock(&mstar_cpuload_lock);
+	}
+	else
+		return;
+
+	load = mstar_load_freq;
+#elif defined(CONFIG_ARM_MTKTV_CPUFREQ)
+	int i;
+	int cpu = policy->cpu;
+	unsigned int load_freq = 0;
+
+	mutex_lock(&mtktv_cpuload_lock);
+	for_each_online_cpu(i)
+	{
+		if(load_freq < mtktv_cpu_load_freq[i])
+		{
+			load_freq = mtktv_cpu_load_freq[i];
+		}
+		total_load += mtktv_cpu_load_freq[i];
+	}
+	mutex_unlock(&mtktv_cpuload_lock);
+
+	load = load_freq;
+	max_index = cpufreq_frequency_table_target(policy, policy->max, CPUFREQ_RELATION_C);
+#endif
 
 	/* Check for frequency increase */
 	if (load > dbs_data->up_threshold) {
 		/* If switching to max speed, apply sampling_down_factor */
 		if (policy->cur < policy->max)
 			policy_dbs->rate_mult = dbs_data->sampling_down_factor;
-		dbs_freq_increase(policy, policy->max);
+#if (defined(CONFIG_MP_DVFS_CPUHOTPLUG_USE_ONLINE_CPU_MAX_LOAD) && defined(CONFIG_MSTAR_DVFS)) || defined(CONFIG_ARM_MTKTV_CPUFREQ)
+		if (total_load <= DEF_BOOST_CONSTRAIN && max_index != 0)
+			__cpufreq_driver_target(policy, freq_table[max_index-1].frequency, CPUFREQ_RELATION_C);
+		else
+#endif
+			dbs_freq_increase(policy, policy->max);
 	} else {
 		/* Calculate the next frequency proportional to load */
 		unsigned int freq_next, min_f, max_f;
@@ -165,8 +229,13 @@ static void od_update(struct cpufreq_policy *policy)
 			freq_next = od_ops.powersave_bias_target(policy,
 								 freq_next,
 								 CPUFREQ_RELATION_L);
-
-		__cpufreq_driver_target(policy, freq_next, CPUFREQ_RELATION_C);
+#if (defined(CONFIG_MP_DVFS_CPUHOTPLUG_USE_ONLINE_CPU_MAX_LOAD) && defined(CONFIG_MSTAR_DVFS)) || defined(CONFIG_ARM_MTKTV_CPUFREQ)
+		cur_index = cpufreq_frequency_table_target(policy, freq_next, CPUFREQ_RELATION_C);
+		if (cur_index == max_index && max_index != 0 && total_load <= DEF_BOOST_CONSTRAIN )
+			__cpufreq_driver_target(policy, freq_table[max_index-1].frequency, CPUFREQ_RELATION_C);
+		else
+#endif
+			__cpufreq_driver_target(policy, freq_next, CPUFREQ_RELATION_C);
 	}
 }
 

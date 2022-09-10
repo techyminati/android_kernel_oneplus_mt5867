@@ -15,6 +15,9 @@
 #include <linux/slab.h>
 
 static DEFINE_SPINLOCK(cpufreq_stats_lock);
+#ifdef CONFIG_MSTAR_DVFS
+extern unsigned int MDrvDvfsVerifyCpuClock(unsigned int dwCpuClock, unsigned int dwCpu);
+#endif
 
 struct cpufreq_stats {
 	unsigned int total_trans;
@@ -32,7 +35,10 @@ static void cpufreq_stats_update(struct cpufreq_stats *stats)
 	unsigned long long cur_time = get_jiffies_64();
 
 	spin_lock(&cpufreq_stats_lock);
-	stats->time_in_state[stats->last_index] += cur_time - stats->last_time;
+#ifdef CONFIG_MP_DVFS_FREQ_TABLE_GET_INDEX_PATCH
+	if(stats->last_index != -1)
+#endif
+		stats->time_in_state[stats->last_index] += cur_time - stats->last_time;
 	stats->last_time = cur_time;
 	spin_unlock(&cpufreq_stats_lock);
 }
@@ -63,6 +69,13 @@ static ssize_t show_time_in_state(struct cpufreq_policy *policy, char *buf)
 
 	cpufreq_stats_update(stats);
 	for (i = 0; i < stats->state_num; i++) {
+#ifdef CONFIG_MSTAR_DVFS
+		/* We don't allow others to see system max frequency. */
+		if ((stats->freq_table[i] > policy->cpuinfo.max_freq) || (stats->freq_table[i] < policy->cpuinfo.min_freq))
+			continue;
+		if (!MDrvDvfsVerifyCpuClock(stats->freq_table[i]/1000, policy->cpu))
+			continue;
+#endif
 		len += sprintf(buf + len, "%u %llu\n", stats->freq_table[i],
 			(unsigned long long)
 			jiffies_64_to_clock_t(stats->time_in_state[i]));
@@ -148,6 +161,18 @@ static int freq_table_get_index(struct cpufreq_stats *stats, unsigned int freq)
 	for (index = 0; index < stats->max_state; index++)
 		if (stats->freq_table[index] == freq)
 			return index;
+
+#ifdef CONFIG_MP_DVFS_FREQ_TABLE_GET_INDEX_PATCH
+#if 0
+	for (index = 0; index < stat->max_state; index++)
+		printk("\033[35mFunction = %s, Line = %d, stat->freq_table[%d] is %d\033[m\n", __PRETTY_FUNCTION__, __LINE__, index, stat->freq_table[index]);
+#endif
+	printk(KERN_DEBUG "\033[0;32;31m [DVFS] %s %d stat->max_state is %u, freq is %u\033[m\n", __func__, __LINE__, stats->max_state, freq);
+	printk(KERN_DEBUG "\033[0;32;31m [DVFS] %s %d You have to notify freq_table,because can't find freq in freq_table\033[m\n",__func__,__LINE__);
+	printk(KERN_DEBUG "\033[0;32;31m [DVFS] %s %d You have to notify freq_table,because can't find freq in freq_table\033[m\n",__func__,__LINE__);
+	printk(KERN_DEBUG "\033[0;32;31m [DVFS] %s %d You have to notify freq_table,because can't find freq in freq_table\033[m\n",__func__,__LINE__);
+#endif
+
 	return -1;
 }
 

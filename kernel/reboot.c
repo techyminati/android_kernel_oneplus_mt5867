@@ -17,6 +17,16 @@
 #include <linux/syscore_ops.h>
 #include <linux/uaccess.h>
 
+#if defined(CONFIG_MSTAR_PM)
+#include <mdrv_pm.h>
+#endif
+
+#if defined(CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND) || defined(CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE) || defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL)
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+extern atomic_t disable_dvfs_reboot;
+#endif
+#endif
+
 /*
  * this indicates whether you can reboot with ctrl-alt-del: the default is yes
  */
@@ -241,13 +251,29 @@ void migrate_to_reboot_cpu(void)
  */
 void kernel_restart(char *cmd)
 {
+#if defined(CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND) || defined(CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE) || defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL)
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	atomic_set(&disable_dvfs_reboot, 1);
+#endif
+#endif
+
+    extern ptrdiff_t   mstar_pm_base;
 	kernel_restart_prepare(cmd);
 	migrate_to_reboot_cpu();
 	syscore_shutdown();
 	if (!cmd)
 		pr_emerg("Restarting system\n");
 	else
-		pr_emerg("Restarting system with command '%s'\n", cmd);
+		pr_emerg("Restarting system with command '%s' from %s %d %d\n", cmd, current->comm, current->pid, current->tgid);
+
+	#if defined(CONFIG_ARM)
+	*((volatile unsigned int*) (0xfd000000 + (0x3008 << 1))) = 0x0e00;
+	*((volatile unsigned int*) (0xfd000000 + (0x300a << 1))) = 0x0727;
+	#elif defined(CONFIG_ARM64)
+	*((volatile unsigned int*) (mstar_pm_base + (0x3008 << 1))) = 0x0e00;
+	*((volatile unsigned int*) (mstar_pm_base + (0x300a << 1))) = 0x0727;
+	#endif
+
 	kmsg_dump(KMSG_DUMP_RESTART);
 	machine_restart(cmd);
 }
@@ -277,13 +303,39 @@ void kernel_halt(void)
 }
 EXPORT_SYMBOL_GPL(kernel_halt);
 
+#ifdef CONFIG_MSTAR_MBX
+#if (MP_PLATFORM_PM == 1)
+extern void  MDrv_MBX_NotifyPMPassword(unsigned char passwd[16]);
+static void mstar_str_notifypmmaxcnt_off(void)
+{
+    static unsigned char pass_wd[16]={0x99,0x88,0x77,0x66,0x55,0x44,0x33,0x22,
+                                      0x11,0x00,0xFF,0xEE,0xDD,0xCC,0xBB,0xAA};
+    pass_wd[0x0A]=0xFD;
+    MDrv_MBX_NotifyPMPassword(pass_wd);
+    while(1);
+}
+#endif
+#endif
+
 /**
  *	kernel_power_off - power_off the system
  *
  *	Shutdown everything and perform a clean system power_off.
  */
+int check_boot_mode = 1;
+EXPORT_SYMBOL(check_boot_mode);
 void kernel_power_off(void)
 {
+#if defined(CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND) || defined(CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE) || defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL)
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+        atomic_set(&disable_dvfs_reboot, 1);
+#endif
+#endif
+
+#if defined(CONFIG_MSTAR_PM)
+	check_boot_mode = 0;
+#endif
+
 	kernel_shutdown_prepare(SYSTEM_POWER_OFF);
 	if (pm_power_off_prepare)
 		pm_power_off_prepare();
@@ -292,6 +344,11 @@ void kernel_power_off(void)
 	pr_emerg("Power down\n");
 	kmsg_dump(KMSG_DUMP_POWEROFF);
 	machine_power_off();
+#ifdef CONFIG_MSTAR_MBX
+#if (MP_PLATFORM_PM == 1)
+	mstar_str_notifypmmaxcnt_off();
+#endif
+#endif
 }
 EXPORT_SYMBOL_GPL(kernel_power_off);
 
@@ -336,8 +393,10 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	/* Instead of trying to make the power_off code look like
 	 * halt when pm_power_off is not set do it the easy way.
 	 */
+#if (MP_PLATFORM_PM == 0)
 	if ((cmd == LINUX_REBOOT_CMD_POWER_OFF) && !pm_power_off)
 		cmd = LINUX_REBOOT_CMD_HALT;
+#endif
 
 	mutex_lock(&system_transition_mutex);
 	switch (cmd) {

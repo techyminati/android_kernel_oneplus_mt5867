@@ -50,6 +50,21 @@ static inline struct page *new_page_nodemask(struct page *page,
 	if (PageHighMem(page) || (zone_idx(page_zone(page)) == ZONE_MOVABLE))
 		gfp_mask |= __GFP_HIGHMEM;
 
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+	if (unlikely(page_mapping(page) && PageKsm(page)))
+		gfp_mask &= ~__GFP_MOVABLE;
+#endif
+
+#ifdef CONFIG_MP_CMA_PATCH_MIGRATION_FILTER
+	if (page_mapping(page) &&
+		!(mapping_gfp_mask(page_mapping(page)) & __GFP_MOVABLE)) {
+		pr_debug("WARNING, find unmovable file cache page "
+			"in alloc_migrate_target, %ld\n", page_to_pfn(page));
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+		show_page_trace(page_to_pfn(page));
+#endif
+	}
+#endif
 	new_page = __alloc_pages_nodemask(gfp_mask, order,
 				preferred_nid, nodemask);
 
@@ -60,6 +75,9 @@ static inline struct page *new_page_nodemask(struct page *page,
 }
 
 #ifdef CONFIG_MIGRATION
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+extern int migrate_replace_page(struct page *oldpage, struct page *newpage);
+#endif
 
 extern void putback_movable_pages(struct list_head *l);
 extern int migrate_page(struct address_space *mapping,
