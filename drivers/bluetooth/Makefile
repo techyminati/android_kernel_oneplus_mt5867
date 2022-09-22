@@ -12,8 +12,13 @@ obj-$(CONFIG_BT_HCIDTL1)	+= dtl1_cs.o
 obj-$(CONFIG_BT_HCIBT3C)	+= bt3c_cs.o
 obj-$(CONFIG_BT_HCIBLUECARD)	+= bluecard_cs.o
 
-obj-$(CONFIG_BT_HCIBTUSB)	+= btusb.o
+#obj-$(CONFIG_BT_HCIBTUSB)	+= btusb.o
 obj-$(CONFIG_BT_HCIBTSDIO)	+= btsdio.o
+
+BTMTK_NAME = btmtk_usb_unify
+$(BTMTK_NAME)-objs := btmtk.o btusb.o
+#obj-$(CONFIG_BT_HCIBTUSB_MTK) += $(BTMTK_NAME).o
+obj-m += $(BTMTK_NAME).o
 
 obj-$(CONFIG_BT_INTEL)		+= btintel.o
 obj-$(CONFIG_BT_ATH3K)		+= ath3k.o

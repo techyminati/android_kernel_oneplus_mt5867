@@ -500,9 +500,6 @@ dtb-$(CONFIG_SOC_IMX6Q) += \
 	imx6q-udoo.dtb \
 	imx6q-utilite-pro.dtb \
 	imx6q-var-dt6customboard.dtb \
-	imx6q-wandboard.dtb \
-	imx6q-wandboard-revb1.dtb \
-	imx6q-wandboard-revd1.dtb \
 	imx6q-zii-rdu2.dtb \
 	imx6qp-nitrogen6_max.dtb \
 	imx6qp-nitrogen6_som2.dtb \
@@ -1313,14 +1310,14 @@ dtb-$(CONFIG_MSTAR_MT5867) += \
 	mt5867_MediaTek_mt5867_MT5867-H1V1-B2_avb.dtb \
 	mt5867_MediaTek_mt5867_MT5867-H2V1-N2_avb.dtb \
 	mt5867_MediaTek_mt5867_MT5867-H1V1-B2_overlay_dp_avb28.dtbo\
-    mt5867_oneplus_Dubai_eu_MT5867-H1V1-B2_overlay_dp_avb28.dtbo\
-	mt5867_oneplus_Dubai_sa_MT5867-H1V1-B2_overlay_dp_avb28.dtbo\
+	mt5867_op_Dubai_eu_MT5867-H1V1-B2_overlay_dp_avb28.dtbo\
+	mt5867_op_Dubai_sa_MT5867-H1V1-B2_overlay_dp_avb28.dtbo\
 	mt5867_MediaTek_mt5867_MT5867-H2V1-N2_overlay_dp_avb28.dtbo\
 	mt5867_MediaTek_mt5867_MT5867-M1V1-B2_overlay_dp_avb28.dtbo\
 	mt5867_MediaTek_mt5867_MT5867-M2V1-N2_overlay_dp_avb28.dtbo\
-        mt5867_MediaTek_mt5867_MT5867-H1V1-B2_overlay_dp_avb28_ledblink.dtbo\
-        mt5867_MediaTek_mt5867_MT5867-H2V1-N2_overlay_dp_avb28_ledblink.dtbo\
-        mt5867_MediaTek_mt5867_MT5867-M2V1-N2_overlay_dp_avb28_ledblink.dtbo\
+	mt5867_MediaTek_mt5867_MT5867-H1V1-B2_overlay_dp_avb28_ledblink.dtbo\
+	mt5867_MediaTek_mt5867_MT5867-H2V1-N2_overlay_dp_avb28_ledblink.dtbo\
+	mt5867_MediaTek_mt5867_MT5867-M2V1-N2_overlay_dp_avb28_ledblink.dtbo\
 	mt5867_an.main_dtb\
 	mt5867_overlay_28.dtb\
 	mt5867_overlay_avb.dtb\
