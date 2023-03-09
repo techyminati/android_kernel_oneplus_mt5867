@@ -122,7 +122,7 @@ $(DOT_CONFIG): $(KERNEL_SRC_TOP)/$(KERNEL_CONFIG)
 
 $(KERNEL_BZIMAGE): $(DOT_CONFIG)
 	cd $(KERNEL_SRC_TOP); \
-	export PATH=$(TOOLCHAIN)/bin:$(PATH); sh genlink.sh; \
+	export PATH=$(TOOLCHAIN)/bin:$(PATH); \
 	make defconfig KBUILD_DEFCONFIG=mstar_config; \
 	make clean; make -j32;
 	@cp -f $(KERNEL_TARGET_OUT) $@
@@ -130,7 +130,7 @@ $(KERNEL_BZIMAGE): $(DOT_CONFIG)
 
 kernel_clean: $(DOT_CONFIG)
 	cd $(KERNEL_SRC_TOP); \
-	export PATH=$(TOOLCHAIN)/bin:$(PATH); sh genlink.sh; \
+	export PATH=$(TOOLCHAIN)/bin:$(PATH); \
 	make defconfig KBUILD_DEFCONFIG=mstar_config; \
 	make clean
 	@rm -f $(KERNEL_BZIMAGE)

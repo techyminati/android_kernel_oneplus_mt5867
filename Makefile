@@ -544,7 +544,6 @@ config: scripts_basic outputmakefile FORCE
 	$(Q)$(MAKE) $(build)=scripts/kconfig $@
 
 %config: scripts_basic outputmakefile FORCE
-	$(Q)$(CONFIG_SHELL) $(srctree)/genlink.sh
 	$(Q)$(MAKE) $(build)=scripts/kconfig $@
 
 else

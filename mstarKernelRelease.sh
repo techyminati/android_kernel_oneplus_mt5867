@@ -30,7 +30,6 @@ function buildKernel() {
     export PATH=$toolchain:$PATH
     cp $config .config
     cp $config arch/$platform/configs/mstar_config
-    ./genlink.sh
     make defconfig KBUILD_DEFCONFIG=mstar_config
     make clean
     make -j${threads}
