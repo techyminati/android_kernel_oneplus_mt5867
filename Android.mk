@@ -60,7 +60,7 @@ DOT_CONFIG := $(KERNEL_SRC_TOP)/.config
 TOOLCHAIN := /tools/arm/MStar/linaro_aarch64_linux-2014.09_r20170413
 
 ifneq ($(filter arm arm64, $(TARGET_ARCH)),)
-    MSTAR_CONFIG := $(KERNEL_SRC_TOP)/arch/$(TARGET_ARCH)/configs/mstar_config
+    MSTAR_CONFIG := $(KERNEL_SRC_TOP)/arch/$(TARGET_ARCH)/configs/dubai_defconfig
     KERNEL_TARGET_OUT := $(KERNEL_SRC_TOP)/arch/$(TARGET_ARCH)/boot/Image
 else
     $(error Not a supported TARGET_ARCH: $(TARGET_ARCH))
@@ -123,7 +123,7 @@ $(DOT_CONFIG): $(KERNEL_SRC_TOP)/$(KERNEL_CONFIG)
 $(KERNEL_BZIMAGE): $(DOT_CONFIG)
 	cd $(KERNEL_SRC_TOP); \
 	export PATH=$(TOOLCHAIN)/bin:$(PATH); \
-	make defconfig KBUILD_DEFCONFIG=mstar_config; \
+	make defconfig KBUILD_DEFCONFIG=dubai_defconfig; \
 	make clean; make -j32;
 	@cp -f $(KERNEL_TARGET_OUT) $@
 	@cp -f $(KERNEL_BIN_TARGET_OUT) $(KERNEL_DTB)
@@ -131,7 +131,7 @@ $(KERNEL_BZIMAGE): $(DOT_CONFIG)
 kernel_clean: $(DOT_CONFIG)
 	cd $(KERNEL_SRC_TOP); \
 	export PATH=$(TOOLCHAIN)/bin:$(PATH); \
-	make defconfig KBUILD_DEFCONFIG=mstar_config; \
+	make defconfig KBUILD_DEFCONFIG=dubai_defconfig; \
 	make clean
 	@rm -f $(KERNEL_BZIMAGE)
 	@rm -f $(KERNEL_DTB)
