@@ -1717,8 +1717,6 @@ clean: $(clean-dirs)
 		-o -name '*.*.symversions' \) -type f -print | xargs rm -f
 # Mstar patches
 	$(Q)$(MAKE) -C ./drivers/mstar2 clean
-	rm -f include/linux/fusion.h
-	$(Q)$(CONFIG_SHELL) $(srctree)/unlink.sh
 
 # Generate tags for editors
 # ---------------------------------------------------------------------------
