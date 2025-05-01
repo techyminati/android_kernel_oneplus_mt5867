@@ -201,3 +201,4 @@ endif
 obj-$(CONFIG_SMAF)		+= smaf/
 obj-y		+= sw_sync/
 obj-y				+= mtk_misc/
+obj-y                                                   += mtk_misc/

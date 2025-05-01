@@ -245,4 +245,5 @@ source "drivers/smaf/Kconfig"
 source "drivers/switch/Kconfig"
 source "drivers/mstar2/Kconfig"
 source "drivers/mtk_misc/Kconfig"
+source "drivers/mtk_misc/Kconfig"
 endmenu
