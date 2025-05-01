@@ -261,8 +261,11 @@ static inline atomic_t *compound_pincount_ptr(struct page *page)
  * Used for sizing the vmemmap region on some architectures
  */
 #define STRUCT_PAGE_MAX_SHIFT	(order_base_2(sizeof(struct page)))
-
+#ifdef CONFIG_MP_CMA_PATCH_SMALLER_SOCKET_BUFFER
+#define PAGE_FRAG_CACHE_MAX_SIZE	__ALIGN_MASK(4096, ~PAGE_MASK)
+#else
 #define PAGE_FRAG_CACHE_MAX_SIZE	__ALIGN_MASK(32768, ~PAGE_MASK)
+#endif
 #define PAGE_FRAG_CACHE_MAX_ORDER	get_order(PAGE_FRAG_CACHE_MAX_SIZE)
 
 #define page_private(page)		((page)->private)
@@ -311,7 +314,7 @@ struct vm_region {
 #ifdef CONFIG_USERFAULTFD
 #define NULL_VM_UFFD_CTX ((struct vm_userfaultfd_ctx) { NULL, })
 struct vm_userfaultfd_ctx {
-	struct userfaultfd_ctx *ctx;
+	struct userfaultfd_ctx __rcu *ctx;
 };
 #else /* CONFIG_USERFAULTFD */
 #define NULL_VM_UFFD_CTX ((struct vm_userfaultfd_ctx) {})

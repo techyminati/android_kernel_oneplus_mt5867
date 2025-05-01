@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: (GPL-2.0 OR BSD-3-Clause)
+/*
+ * Copyright (c) 2020 MediaTek Inc.
+ */
+/ {
+	memory_info: memory_info {
+		cpu_emi0_base = <0x20000000>;
+		emi0_base_addr = <0x00000000>;
+	};
+
+	reserved_memory: reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+		iommu_cma1: iommu_cma1@cm1 {
+		};
+
+		iommu_cma2: iommu_cma2@cm2 {
+		};
+
+
+	cma_22: cma_22 {
+		compatible = "shared-dma-pool";
+		reusable;
+		heap_name = "IOMMU_DISCRETE_CMA0";
+		reg = <0x0 0x2A400000 0x0 0x01000000>;
+};
+	cma_23: cma_23 {
+		compatible = "shared-dma-pool";
+		reusable;
+		heap_name = "OTHERS_RETURN";
+		reg = <0x0 0x53400000 0x0 0x01000000>;
+};
+
+	default_cma_range: default_cma {
+		compatible = "shared-dma-pool";
+		reusable;
+		reg = <0x0 0x40000000 0x0 0x00400000>;
+		linux,cma-default;
+	};
+
+	nullmem_1 {
+		//reg = <0x0 0x03000000 0x0 0x10000000>;
+		reg = <0x0 0x80000000 0x0 0x10000000>;
+		device_type = "mtk-nullmem";
+	};
+
+	};
+	iommu: iommu {
+		compatible = "mediatek,dtv-iommu";
+		#iommu-cells = <1>;
+//		interrupt-parent = <&mtk_intc1_irq_high>;
+//		interrupts = <0x0 0x1e 0x4>;
+		interrupts = <0x0 0x2d 0x4>;
+		status = "okay";
+		reg = <0x0 0x1c240400 0 0x200>;
+		reg-names = "seal";
+	};
+
+	iommu_test: iommu_test {
+		compatible = "mediatek,dtv-iommu-test";
+		iommus = <&iommu 0>;
+		status = "okay";
+	};
+
+	ion_iommu: ion {
+		compatible = "mediatek,dtv-iommu-ion";
+		iommus = <&iommu 0>;
+		status = "okay";
+	};
+
+	iommu_dmaheap: iommu_dmaheap {
+		compatible = "mediatek,dtv-iommu-dmaheap";
+		iommus = <&iommu 0>;
+		status = "okay";
+	};
+
+	iommu_carveout: iommu_carveout@cv0 {
+		reg = <0x0 0x406FF000 0x0 0x00001000>;
+		mediatek,mpu-map;
+	};
+
+	iommu_carveout0: iommu_carveout0 {
+		compatible = "mediatek,dtv-iommu-carveout";
+		memory-region = <&iommu_carveout>;
+		status = "okay";
+	};
+
+	iommu_cmaheap1: iommu_cmaheap1 {
+		compatible = "mediatek,dtv-iommu-cma1";
+		memory-region = <&iommu_cma1>;
+		status = "okay";
+	};
+
+	mem_cust_policy: mem_cust_policy {
+		cma_region_maxsize = <0x0 0x0>;
+		mali_threshold = <0x18000000>;
+		mali_reduce_migration = <0x1>;
+		need_2xiova = <2 57>;
+		need_zeropage = <5 6>;
+	};
+
+};

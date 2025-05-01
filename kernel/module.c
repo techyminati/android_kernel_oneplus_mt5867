@@ -1387,7 +1387,7 @@ static bool inherit_taint(struct module *mod, struct module *owner)
 	if (mod->using_gplonly_symbols) {
 		pr_err("%s: module using GPL-only symbols uses symbols from proprietary module %s.\n",
 			mod->name, owner->name);
-		return false;
+		return true;
 	}
 
 	if (!test_bit(TAINT_PROPRIETARY_MODULE, &mod->taints)) {
@@ -2248,21 +2248,14 @@ void *__symbol_get(const char *symbol)
 		.warn	= true,
 	};
 
-	preempt_disable();
-	if (!find_symbol(&fsa))
-		goto fail;
-	if (fsa.license != GPL_ONLY) {
-		pr_warn("failing symbol_get of non-GPLONLY symbol %s.\n",
-			symbol);
-		goto fail;
-	}
-	if (strong_try_module_get(fsa.owner))
-		goto fail;
-	preempt_enable();
-	return (void *)kernel_symbol_value(fsa.sym);
-fail:
-	preempt_enable();
-	return NULL;
+    preempt_disable();
+    if (!find_symbol(&fsa) || strong_try_module_get(fsa.owner)) {
+        preempt_enable();
+        return NULL;
+    }
+
+    preempt_enable();
+    return (void *)kernel_symbol_value(fsa.sym);
 }
 EXPORT_SYMBOL_GPL(__symbol_get);
 

@@ -1087,6 +1087,8 @@ void *tee_get_drvdata(struct tee_device *teedev)
 }
 EXPORT_SYMBOL_GPL(tee_get_drvdata);
 
+#ifdef CONFIG_MSTAR_CHIP
+#ifdef CONFIG_TEE_2_4
 struct match_dev_data {
 	struct tee_ioctl_version_data *vers;
 	const void *data;
@@ -1102,6 +1104,33 @@ static int match_dev(struct device *dev, const void *data)
 	return match_data->match(match_data->vers, match_data->data);
 }
 
+static struct tee_context *_teedev_open(struct tee_device *teedev)
+{
+	int rc;
+	struct tee_context *ctx;
+
+	if (!tee_device_get(teedev))
+		return ERR_PTR(-EINVAL);
+
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx) {
+		rc = -ENOMEM;
+		goto err;
+	}
+
+	kref_init(&ctx->refcount);
+	ctx->teedev = teedev;
+	rc = teedev->desc->ops->open(ctx);
+	if (rc)
+		goto err;
+
+	return ctx;
+err:
+	kfree(ctx);
+	tee_device_put(teedev);
+	return ERR_PTR(rc);
+
+}
 struct tee_context *
 tee_client_open_context(struct tee_context *start,
 			int (*match)(struct tee_ioctl_version_data *,
@@ -1227,6 +1256,8 @@ struct bus_type tee_bus_type = {
 	.uevent		= tee_client_device_uevent,
 };
 EXPORT_SYMBOL_GPL(tee_bus_type);
+#endif
+#endif
 
 static int __init tee_init(void)
 {

@@ -334,7 +334,11 @@ static inline void bforget(struct buffer_head *bh)
 static inline struct buffer_head *
 sb_bread(struct super_block *sb, sector_t block)
 {
+#ifdef CONFIG_MP_CMA_PATCH_USE_UNMOVABLE_FILE_CACHE
+	return __bread_gfp(sb->s_bdev, block, sb->s_blocksize, 0);
+#else
 	return __bread_gfp(sb->s_bdev, block, sb->s_blocksize, __GFP_MOVABLE);
+#endif
 }
 
 static inline struct buffer_head *
@@ -358,7 +362,11 @@ sb_breadahead_unmovable(struct super_block *sb, sector_t block)
 static inline struct buffer_head *
 sb_getblk(struct super_block *sb, sector_t block)
 {
+#ifdef CONFIG_MP_CMA_PATCH_USE_UNMOVABLE_FILE_CACHE
+	return __getblk_gfp(sb->s_bdev, block, sb->s_blocksize, 0);
+#else
 	return __getblk_gfp(sb->s_bdev, block, sb->s_blocksize, __GFP_MOVABLE);
+#endif
 }
 
 
@@ -413,7 +421,11 @@ static inline struct buffer_head *__getblk(struct block_device *bdev,
 					   sector_t block,
 					   unsigned size)
 {
+#ifdef CONFIG_MP_CMA_PATCH_USE_UNMOVABLE_FILE_CACHE
+	return __getblk_gfp(bdev, block, size, 0);
+#else
 	return __getblk_gfp(bdev, block, size, __GFP_MOVABLE);
+#endif
 }
 
 /**
@@ -429,7 +441,11 @@ static inline struct buffer_head *__getblk(struct block_device *bdev,
 static inline struct buffer_head *
 __bread(struct block_device *bdev, sector_t block, unsigned size)
 {
+#ifdef CONFIG_MP_CMA_PATCH_USE_UNMOVABLE_FILE_CACHE
+	return __bread_gfp(bdev, block, size, 0);
+#else
 	return __bread_gfp(bdev, block, size, __GFP_MOVABLE);
+#endif
 }
 
 extern int __set_page_dirty_buffers(struct page *page);

@@ -38,8 +38,16 @@
 
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
+#include <chip_setup.h>
 
 #include "mm.h"
+
+#ifdef CONFIG_MSTAR_CHIP
+#ifdef CONFIG_PSTORE_RAM
+#include <linux/pstore_ram.h>
+extern struct ramoops_platform_data ramoops_data;
+#endif
+#endif
 
 #ifdef CONFIG_CPU_CP15_MMU
 unsigned long __init __clear_cr(unsigned long mask)
@@ -47,6 +55,29 @@ unsigned long __init __clear_cr(unsigned long mask)
 	cr_alignment = cr_alignment & ~mask;
 	return cr_alignment;
 }
+#endif
+
+#define NR_BANKS 8
+struct membank {
+        unsigned long start;
+        unsigned long size;
+        unsigned int highmem;
+};
+
+struct meminfo {
+        int nr_banks;
+        struct membank bank[NR_BANKS];
+};
+
+struct meminfo meminfo;
+
+
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+extern unsigned long lx_mem_addr;
+extern unsigned long lx_mem_size;
+#endif
+#if defined(CONFIG_MP_MMA_UMA_WITH_NARROW) || defined(CONFIG_MP_ASYM_UMA_ALLOCATION)
+extern u64 mma_dma_zone_size;
 #endif
 
 #ifdef CONFIG_BLK_DEV_INITRD
@@ -97,12 +128,21 @@ unsigned long arm_dma_pfn_limit;
 void __init setup_dma_zone(const struct machine_desc *mdesc)
 {
 #ifdef CONFIG_ZONE_DMA
-	if (mdesc->dma_zone_size) {
+//#if defined(CONFIG_MP_MMA_UMA_WITH_NARROW) || defined(CONFIG_MP_ASYM_UMA_ALLOCATION)
+//	if (mma_dma_zone_size) {
+//		arm_dma_zone_size = mma_dma_zone_size;
+//		arm_dma_limit = PHYS_OFFSET + arm_dma_zone_size - 1;
+//	} else
+//		arm_dma_limit = 0xffffffff;
+//#else
+	if (mdesc->dma_zone_size > 0) {
 		arm_dma_zone_size = mdesc->dma_zone_size;
 		arm_dma_limit = PHYS_OFFSET + arm_dma_zone_size - 1;
 	} else
 		arm_dma_limit = 0xffffffff;
+//#endif
 	arm_dma_pfn_limit = arm_dma_limit >> PAGE_SHIFT;
+	pr_info("arm_dma_limit:0x%lx, arm_dma_pfn_limit:0x%lx\n", arm_dma_limit, arm_dma_pfn_limit);
 #endif
 }
 
@@ -143,6 +183,18 @@ int pfn_valid(unsigned long pfn)
 	return 0;
 }
 EXPORT_SYMBOL(pfn_valid);
+
+int pfn_is_map_memory(unsigned long pfn)
+{
+	phys_addr_t addr = PFN_PHYS(pfn);
+
+	/* avoid false positives for bogus PFNs, see comment in pfn_valid() */
+	if (PHYS_PFN(addr) != pfn)
+		return 0;
+
+	return memblock_is_map_memory(addr);
+}
+EXPORT_SYMBOL(pfn_is_map_memory);
 #endif
 
 static bool arm_memblock_steal_permitted = true;
@@ -220,6 +272,10 @@ void check_cpu_icache_size(int cpuid)
 		icache_size = size;
 }
 #endif
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+extern phys_addr_t arm_lowmem_limit;
+void reserve_page_trace_mem(phys_addr_t beg,phys_addr_t end);
+#endif
 
 void __init arm_memblock_init(const struct machine_desc *mdesc)
 {
@@ -234,11 +290,38 @@ void __init arm_memblock_init(const struct machine_desc *mdesc)
 	if (mdesc->reserve)
 		mdesc->reserve();
 
+#ifdef CONFIG_MP_DEBUG_TOOL_MEMORY_USAGE_TRACE
+	reserve_page_trace_mem(PHYS_OFFSET, arm_lowmem_limit);
+#endif
+
+
 	early_init_fdt_scan_reserved_mem();
 
+#ifndef CONFIG_MP_CMA_PATCH_CMA_DEFAULT_BUFFER_LIMITTED_TO_LX0
 	/* reserve memory for DMA contiguous allocations */
+	// this is original case, we only find default cma_buffer @ whole lowmem(usually @ the backend of lowmem)
+	printk("\033[35mFunction = %s, Line = %d, find cma_default buffer at whole lowmem\033[m\n", __PRETTY_FUNCTION__, __LINE__);
 	dma_contiguous_reserve(arm_dma_limit);
+#else
+	// this is to limit cma default buffer at LX_MEM(LX0)
+	printk("\033[35mFunction = %s, Line = %d, find cma_default buffer at only LX0\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+	dma_contiguous_reserve(min((lx_mem_addr+lx_mem_size), (unsigned long)arm_dma_limit));
+#endif
 
+#if 1
+#ifdef CONFIG_MSTAR_CHIP
+	/* Reserve 16K for put magic Key,new magic mechanism*/
+	memblock_reserve(PHYS_OFFSET, 16 * 1024);
+	memblock_reserve(__pa(SECOND_MAGIC_NUMBER_ADRESS), 4 * 1024);
+
+#ifdef CONFIG_PSTORE_RAM
+	/* Reserve this to do ramoops (the region is defined @ dts).
+	 * The ramoops_data is defined @ fs/pstore/ram.c, you can change the setting.
+	 */
+	memblock_reserve(ramoops_data.mem_address, ramoops_data.mem_size);
+#endif
+#endif
+#endif
 	arm_memblock_steal_permitted = false;
 	memblock_dump_all();
 }

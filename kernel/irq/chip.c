@@ -995,6 +995,7 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 		handle = handle_bad_irq;
 	} else {
 		struct irq_data *irq_data = &desc->irq_data;
+#ifdef CONFIG_MP_PLATFORM_NATIVE_IRQ
 #ifdef CONFIG_IRQ_DOMAIN_HIERARCHY
 		/*
 		 * With hierarchical domains we might run into a
@@ -1017,8 +1018,16 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 			irq_data = irq_data->parent_data;
 		}
 #endif
+#endif
 		if (WARN_ON(!irq_data || irq_data->chip == &no_irq_chip))
+#ifdef CONFIG_MP_PLATFORM_NATIVE_IRQ
+		{
+			pr_crit("desc->irq_data.chip = 0x%p, no_irq_chip = 0x%p, irq = %d\n", desc->irq_data.chip, &no_irq_chip, desc->irq_data.irq);
 			return;
+		}
+#else
+			return;
+#endif
 	}
 
 	/* Uninstall? */
@@ -1034,6 +1043,7 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 	desc->name = name;
 
 	if (handle != handle_bad_irq && is_chained) {
+#ifdef CONFIG_MP_PLATFORM_NATIVE_IRQ
 		unsigned int type = irqd_get_trigger_type(&desc->irq_data);
 
 		/*
@@ -1048,6 +1058,7 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 			__irq_set_trigger(desc, type);
 			desc->handle_irq = handle;
 		}
+#endif
 
 		irq_settings_set_noprobe(desc);
 		irq_settings_set_norequest(desc);

@@ -58,6 +58,7 @@
 
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/signal.h>
+#include "audit.h"	/* audit_signal_info() */
 /*
  * SLAB caches for signal bits.
  */

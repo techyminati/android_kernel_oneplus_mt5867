@@ -26,6 +26,10 @@
 #include <linux/spinlock.h>
 #include <linux/notifier.h>
 #include <linux/suspend.h>
+#if defined(CONFIG_MSTAR_PM)
+#include <linux/input.h>
+#include <mdrv_pm.h>
+#endif
 #include <linux/slab.h>
 
 /*
@@ -67,6 +71,168 @@ static ktime_t last_monotime; /* monotonic time before last suspend */
 static ktime_t curr_monotime; /* monotonic time after last suspend */
 static ktime_t last_stime; /* monotonic boottime offset before last suspend */
 static ktime_t curr_stime; /* monotonic boottime offset after last suspend */
+
+#if defined(CONFIG_MSTAR_PM)
+static struct pwrkey_handle_t {
+	int count;
+	int nfx_key_cnt;
+	unsigned int keycode;
+} pwrkey_handle;
+
+#define PWRKEYSIZE 5
+u32 powerkey[PWRKEYSIZE];
+EXPORT_SYMBOL(powerkey);
+
+#define NFXKEYSIZE 5
+u32 netflixkey[NFXKEYSIZE];
+EXPORT_SYMBOL(netflixkey);
+
+#define ADDHOTKEYSIZE 32
+struct hot_key {
+	char name[20];
+	u8 index;
+	int key_cnt;
+	unsigned int keycode;
+};
+struct hot_key mtkrc_hotkey[ADDHOTKEYSIZE]={0};
+EXPORT_SYMBOL(mtkrc_hotkey);
+extern u8 MDrv_PM_GetPowerOnKey(void);
+extern void MDrv_PM_CleanPowerOnKey(void);
+extern u8 MDrv_PM_GetWakeupSource(void);
+
+int ir_PM51_PWR_profile_parse_num = 0;
+EXPORT_SYMBOL(ir_PM51_PWR_profile_parse_num);
+
+int ir_PM51_NFX_profile_parse_num = 0;
+EXPORT_SYMBOL(ir_PM51_NFX_profile_parse_num);
+
+int ir_PM51_ADDHOTKEY_profile_parse_num = 0;
+EXPORT_SYMBOL(ir_PM51_ADDHOTKEY_profile_parse_num);
+#define CUSTOM_POWERKEY_SET   (1L << 31)
+int mstar_cust_pwrkey_handler(unsigned int keycode)
+{
+	int i=0;
+
+	/* if CUST_POWERKEY_SET bit is set. always store the keycode */
+	if (CUSTOM_POWERKEY_SET & keycode) {
+		pwrkey_handle.keycode = keycode ^ CUSTOM_POWERKEY_SET;
+		return 0;
+	}
+
+	switch (keycode) {
+#if 0
+		/* poweron key */
+		case 0x46:
+			pwrkey_handle.keycode = keycode;
+			break;
+			/* netflix key */
+		case 0x03:
+			pwrkey_handle.nfx_key_cnt ++;
+			pwrkey_handle.keycode = keycode;
+			break;
+#endif
+
+        //wangguan add 2021/02/02 begin
+        /* add uart prime key wakeup reason other &rm left key show netflix wakeup
+        */
+        case 0x0e:
+            pwrkey_handle.keycode = keycode;
+            break;
+        //wangguan add 2021/02/02 end	
+
+		default:
+			for(i=0;i<ir_PM51_PWR_profile_parse_num;i++) {
+				if(keycode==powerkey[i]) {
+					pwrkey_handle.keycode = keycode;
+				}
+			}
+			for(i=0;i<ir_PM51_NFX_profile_parse_num;i++) {
+				if(keycode==netflixkey[i]) {
+					pwrkey_handle.nfx_key_cnt ++;
+					pwrkey_handle.keycode = keycode;
+				}
+			}
+			for(i=0;i<ir_PM51_ADDHOTKEY_profile_parse_num;i++) {
+				if(keycode==mtkrc_hotkey[i].keycode) {
+					mtkrc_hotkey[i].key_cnt ++;
+					pwrkey_handle.keycode = keycode;
+				}
+			}
+			break;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(mstar_cust_pwrkey_handler);
+
+static ssize_t mstar_resume_reason_show(struct kobject *kobj, struct kobj_attribute *attr,
+		char *buf)
+{
+	int buf_offset = 0;
+	int sel;
+	int i=0;
+	unsigned int keycode = pwrkey_handle.keycode;
+	bool gethotkey=false;
+	const char *reason[] = {
+		"POWER",
+		"NETFLIX",
+		"OTHERS",
+	};
+
+	if (keycode == 0)
+		keycode = MDrv_PM_GetPowerOnKey();
+
+	switch (keycode) {
+/*
+		case 0x46:
+			sel = 0;
+			break;
+		case 0x03:
+			sel = 1;
+			break;
+*/
+
+	//wangguan add 2021/02/02 begin
+	/* add uart prime key wakeup reason other &rm left key show netflix wakeup
+	*/
+	case 0x0e:
+		sel = 2;
+		break;
+	//wangguan add 2021/02/02 begin
+		default:
+			sel = 2;
+			for(i=0;i<ir_PM51_PWR_profile_parse_num;i++) {
+				if(keycode==powerkey[i]) {
+					sel = 0;
+					break;
+				}
+			}
+			for(i=0;i<ir_PM51_NFX_profile_parse_num;i++) {
+				if(keycode==netflixkey[i]) {
+					sel = 1;
+					break;
+				}
+			}
+			for(i=0;i<ir_PM51_ADDHOTKEY_profile_parse_num;i++) {
+				if(keycode==mtkrc_hotkey[i].keycode) {
+					gethotkey=true;
+					break;
+				}
+			}
+	}
+
+	buf_offset += sprintf(buf + buf_offset,
+			"power on keycode: %x, reason: %s, resume: %d, netflix_key_count = %d\n",
+			(unsigned int)keycode, (gethotkey)?mtkrc_hotkey[i].name:reason[sel], pwrkey_handle.count,
+			pwrkey_handle.nfx_key_cnt);
+
+	for(i=0;i<ir_PM51_ADDHOTKEY_profile_parse_num;i++) {
+		buf_offset += sprintf(buf + buf_offset,"%s_key_count = %d\n",
+				mtkrc_hotkey[i].name,mtkrc_hotkey[i].key_cnt);
+	}
+	return buf_offset;
+}
+#endif
 
 static void init_node(struct wakeup_irq_node *p, int irq)
 {
@@ -322,6 +488,68 @@ static ssize_t last_resume_reason_show(struct kobject *kobj,
 		buf_offset = scnprintf(buf, PAGE_SIZE, "-1 %s",
 				       non_irq_wake_reason);
 
+#if defined(CONFIG_MSTAR_PM)
+	int sel;
+	int i=0;
+	unsigned int keycode = pwrkey_handle.keycode;
+	bool gethotkey=false;
+	const char *reason[] = {
+		"POWER",
+		"NETFLIX",
+		"OTHERS",
+	};
+
+	if (keycode == 0)
+		keycode = MDrv_PM_GetPowerOnKey();
+
+	switch (keycode) {
+		case 0x46:
+			sel = 0;
+			break;
+		case 0x03:
+			sel = 1;
+			break;
+	//wangguan add 2021/02/02 begin
+	/* add uart prime key wakeup reason other &rm left key show netflix wakeup
+	*/
+		case 0x0e:
+			sel = 2;
+			break;
+	//wangguan add 2021/02/02 end
+		default:
+			sel = 2;
+			for(i=0;i<ir_PM51_PWR_profile_parse_num;i++) {
+				if(keycode==powerkey[i]) {
+					sel = 0;
+					break;
+				}
+			}
+			for(i=0;i<ir_PM51_NFX_profile_parse_num;i++) {
+				if(keycode==netflixkey[i]) {
+					sel = 1;
+					break;
+			}
+		}
+		for(i=0;i<ir_PM51_ADDHOTKEY_profile_parse_num;i++) {
+			if(keycode==mtkrc_hotkey[i].keycode) {
+				gethotkey=true;
+				break;
+			}
+		}
+	}
+
+	buf_offset += sprintf(buf + buf_offset,
+			"power on keycode: %x, reason: %s, resume: %d, netflix_key_count = %d\n",
+			(unsigned int)keycode, (gethotkey)?mtkrc_hotkey[i].name:reason[sel], pwrkey_handle.count,
+			pwrkey_handle.nfx_key_cnt);
+
+	for(i=0;i<ir_PM51_ADDHOTKEY_profile_parse_num;i++) {
+			buf_offset += sprintf(buf + buf_offset,"%s_key_count = %d\n",
+			mtkrc_hotkey[i].name,mtkrc_hotkey[i].key_cnt);
+	}
+
+#endif
+
 	spin_unlock_irqrestore(&wakeup_reason_lock, flags);
 
 	return buf_offset;
@@ -360,10 +588,16 @@ static ssize_t last_suspend_time_show(struct kobject *kobj,
 
 static struct kobj_attribute resume_reason = __ATTR_RO(last_resume_reason);
 static struct kobj_attribute suspend_time = __ATTR_RO(last_suspend_time);
+#if defined(CONFIG_MSTAR_PM)
+static struct kobj_attribute mstar_resume_reason = __ATTR_RO(mstar_resume_reason);
+#endif
 
 static struct attribute *attrs[] = {
 	&resume_reason.attr,
 	&suspend_time.attr,
+#if defined(CONFIG_MSTAR_PM)
+	&mstar_resume_reason.attr,
+#endif
 	NULL,
 };
 static struct attribute_group attr_group = {
@@ -380,6 +614,10 @@ static int wakeup_reason_pm_event(struct notifier_block *notifier,
 		last_monotime = ktime_get();
 		/* monotonic time since boot including the time spent in suspend */
 		last_stime = ktime_get_boottime();
+#if defined(CONFIG_MSTAR_PM)
+		MDrv_PM_CleanPowerOnKey();
+		pwrkey_handle.keycode = 0;
+#endif
 		clear_wakeup_reasons();
 		break;
 	case PM_POST_SUSPEND:
@@ -387,6 +625,20 @@ static int wakeup_reason_pm_event(struct notifier_block *notifier,
 		curr_monotime = ktime_get();
 		/* monotonic time since boot including the time spent in suspend */
 		curr_stime = ktime_get_boottime();
+#if defined(CONFIG_MSTAR_PM)
+		if (wakeup_reason != RESUME_ABORT) {
+			unsigned int key_code = MDrv_PM_GetPowerOnKey();
+			/* If wakeup from CEC, ignore keycode handler */
+			unsigned int wakeup_source = MDrv_PM_GetWakeupSource();
+			if (wakeup_source != PM_WAKEUPSRC_CEC
+				&& wakeup_source != PM_WAKEUPSRC_CEC_PORT1
+				&& wakeup_source != PM_WAKEUPSRC_CEC_PORT2
+				&& wakeup_source != PM_WAKEUPSRC_CEC_PORT3) {
+				mstar_cust_pwrkey_handler(key_code);
+			}
+			pwrkey_handle.count ++;
+		}
+#endif
 		print_wakeup_sources();
 		break;
 	default:
@@ -401,6 +653,10 @@ static struct notifier_block wakeup_reason_pm_notifier_block = {
 
 static int __init wakeup_reason_init(void)
 {
+
+#if defined(CONFIG_MSTAR_PM)
+	pwrkey_handle.count = 0;
+#endif
 	if (register_pm_notifier(&wakeup_reason_pm_notifier_block)) {
 		pr_warn("[%s] failed to register PM notifier\n", __func__);
 		goto fail;

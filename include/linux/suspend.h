@@ -11,6 +11,7 @@
 #include <linux/android_kabi.h>
 #include <asm/errno.h>
 
+extern void tmp_hold_suspend_finish_pm_wakelock(void);
 #ifdef CONFIG_VT
 extern void pm_set_vt_switch(int);
 #else

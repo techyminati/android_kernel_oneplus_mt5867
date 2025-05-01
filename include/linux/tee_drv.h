@@ -28,6 +28,9 @@
 #define TEE_SHM_POOL		BIT(5)  /* Memory allocated from pool */
 #define TEE_SHM_KERNEL_MAPPED	BIT(6)  /* Memory mapped in kernel space */
 #define TEE_SHM_PRIV		BIT(7)  /* Memory private to TEE driver */
+#ifdef CONFIG_MSTAR_CHIP
+#define TEE_SHM_PREALLOC        BIT(31)  /* Memory allocated from pool for RPC prealloc */
+#endif
 
 struct device;
 struct tee_device;
@@ -458,6 +461,7 @@ static inline int tee_shm_get_id(struct tee_shm *shm)
  */
 struct tee_shm *tee_shm_get_from_id(struct tee_context *ctx, int id);
 
+#ifdef CONFIG_MSTAR_CHIP
 /**
  * tee_client_open_context() - Open a TEE context
  * @start:	if not NULL, continue search after this context
@@ -530,7 +534,7 @@ int tee_client_close_session(struct tee_context *ctx, u32 session);
 int tee_client_invoke_func(struct tee_context *ctx,
 			   struct tee_ioctl_invoke_arg *arg,
 			   struct tee_param *param);
-
+#endif
 /**
  * tee_client_cancel_req() - Request cancellation of the previous open-session
  * or invoke-command operations in a Trusted Application
@@ -554,7 +558,12 @@ static inline bool tee_param_is_memref(struct tee_param *param)
 		return false;
 	}
 }
-
+#ifdef CONFIG_MSTAR_CHIP
+int tee_shm_alloc_tmp(struct tee_shm **shm, int dataSize, struct tee_device *teedev);
+void* tee_shm_get_kaddr(struct tee_shm *shm);
+phys_addr_t* tee_shm_get_paddr(struct tee_shm *shm);
+void tee_shm_free_tmp(struct tee_shm *shm, struct tee_device *teedev);
+#endif
 extern struct bus_type tee_bus_type;
 
 /**

@@ -11,6 +11,9 @@
 #include <linux/module.h>
 #include <linux/sched/clock.h>
 #include <linux/slab.h>
+#ifdef CONFIG_MSTAR_DVFS
+extern unsigned int MDrvDvfsVerifyCpuClock(unsigned int dwCpuClock, unsigned int dwCpu);
+#endif
 
 struct cpufreq_stats {
 	unsigned int total_trans;
@@ -32,6 +35,9 @@ static void cpufreq_stats_update(struct cpufreq_stats *stats,
 {
 	unsigned long long cur_time = local_clock();
 
+#ifdef CONFIG_MP_DVFS_FREQ_TABLE_GET_INDEX_PATCH
+	if(stats->last_index != -1)
+#endif
 	stats->time_in_state[stats->last_index] += cur_time - time;
 	stats->last_time = cur_time;
 }
@@ -75,23 +81,13 @@ static ssize_t show_time_in_state(struct cpufreq_policy *policy, char *buf)
 	int i;
 
 	for (i = 0; i < stats->state_num; i++) {
-		if (pending) {
-			if (i == stats->last_index) {
-				/*
-				 * Prevent the reset_time read from occurring
-				 * before the reset_pending read above.
-				 */
-				smp_rmb();
-				time = local_clock() - READ_ONCE(stats->reset_time);
-			} else {
-				time = 0;
-			}
-		} else {
-			time = stats->time_in_state[i];
-			if (i == stats->last_index)
-				time += local_clock() - stats->last_time;
-		}
-
+#ifdef CONFIG_MSTAR_DVFS
+		/* We don't allow others to see system max frequency. */
+		if ((stats->freq_table[i] > policy->cpuinfo.max_freq) || (stats->freq_table[i] < policy->cpuinfo.min_freq))
+			continue;
+		if (!MDrvDvfsVerifyCpuClock(stats->freq_table[i]/1000, policy->cpu))
+			continue;
+#endif
 		len += sprintf(buf + len, "%u %llu\n", stats->freq_table[i],
 			       nsec_to_clock_t(time));
 	}
@@ -190,6 +186,7 @@ static int freq_table_get_index(struct cpufreq_stats *stats, unsigned int freq)
 	for (index = 0; index < stats->max_state; index++)
 		if (stats->freq_table[index] == freq)
 			return index;
+
 	return -1;
 }
 

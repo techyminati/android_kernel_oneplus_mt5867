@@ -167,6 +167,35 @@ static const struct sysrq_key_op sysrq_crash_op = {
 
 static void sysrq_handle_reboot(int key)
 {
+    loff_t off = 0;
+    char *sCmdStr = "boot-poweron";
+    struct file *fd;
+    size_t t;
+
+    fd = filp_open("/dev/block/platform/mstar_mci.0/by-name/misc", O_RDWR, 0);
+    if (!IS_ERR(fd))
+    {
+        char *kernel_buf = kmalloc(strlen(sCmdStr) + 1, GFP_KERNEL);
+        if (!kernel_buf)
+        {
+            printk(KERN_ERR "Failed to allocate memory\n");
+            filp_close(fd, NULL);
+            return;
+        }
+
+        strcpy(kernel_buf, sCmdStr);
+
+        t = kernel_write(fd, kernel_buf, strlen(sCmdStr) + 1, &off);
+        printk(KERN_ERR "write to \"/dev/block/platform/mstar_mci.0/by-name/misc\" %ld bytes\n", (long int)t);
+        vfs_fsync(fd, 0);
+        kfree(kernel_buf);
+        filp_close(fd, NULL);
+    }
+    else
+    {
+        printk(KERN_ERR "open \"/dev/block/platform/mstar_mci.0/by-name/misc\" failed\n");
+    }
+
 	lockdep_off();
 	local_irq_enable();
 	emergency_restart();

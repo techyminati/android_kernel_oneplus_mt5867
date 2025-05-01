@@ -14,6 +14,15 @@ obj-y     = fork.o exec_domain.o panic.o \
 
 obj-$(CONFIG_USERMODE_DRIVER) += usermode_driver.o
 obj-$(CONFIG_MODULES) += kmod.o
+
+# compatiblity with mstar
+EXTRA_CFLAGS      +=  -Idrivers/mstar/mbx/drv
+EXTRA_CFLAGS      +=  -Idrivers/mstar/include
+
+# compatiblity with mstar2
+EXTRA_CFLAGS      +=  -Idrivers/mstar2/drv/mbx
+EXTRA_CFLAGS      +=  -I$(srctree)/drivers/mstar2/include
+
 obj-$(CONFIG_MULTIUSER) += groups.o
 
 ifdef CONFIG_FUNCTION_TRACER
@@ -179,10 +188,15 @@ $(ALL_KMI_SYMBOLS): $(if $(filter arm64,$(ARCH)),$(wildcard $(srctree)/android/a
 
 # ABI protected exports list file specific to ARCH if exists else empty
 ABI_PROTECTED_EXPORTS_FILE :=
+# MTK: don't check gki module if we are not using prebuilt gki module
+ifneq ($(KERNEL_MTKTV_GKI_PREBUILT_GKI_MODULE),true)
+	ABI_PROTECTED_EXPORTS_FILE :=
+else
 ifeq ($(ARCH),arm64)
 	ABI_PROTECTED_EXPORTS_FILE := $(wildcard $(srctree)/android/abi_gki_protected_exports_aarch64)
 else
 	ABI_PROTECTED_EXPORTS_FILE := $(wildcard $(srctree)/android/abi_gki_protected_exports_$(ARCH))
+endif
 endif
 
 include/generated/gki_module_protected_exports.h: $(ABI_PROTECTED_EXPORTS_FILE) \

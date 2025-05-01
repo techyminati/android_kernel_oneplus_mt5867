@@ -756,6 +756,35 @@ DECLARE_TRACE(sched_update_nr_running_tp,
 	TP_PROTO(struct rq *rq, int change),
 	TP_ARGS(rq, change));
 
+#if defined(CONFIG_PLAT_MSTAR)
+/* below event is mstar customized */
+/*
+ * Tracepoint for showing cpu freq change
+ */
+TRACE_EVENT(cpufreq_change,
+
+       TP_PROTO(int cpu, unsigned int old, unsigned int new),
+
+       TP_ARGS(cpu, old, new),
+
+       TP_STRUCT__entry(
+               __field(int, cpu)
+               __field(unsigned int, cpufreq_old)
+               __field(unsigned int, cpufreq_new)
+       ),
+
+       TP_fast_assign(
+               __entry->cpu   = cpu;
+               __entry->cpufreq_old = old;
+               __entry->cpufreq_new = new;
+       ),
+
+       TP_printk("dvfs cpu %d freq change from %u MHZ to %u MHZ",
+                       __entry->cpu,
+                       __entry->cpufreq_old,
+                       __entry->cpufreq_new)
+);
+#endif /* CONFIG_PLAT_MSTAR */
 #endif /* _TRACE_SCHED_H */
 
 /* This part must be outside protection */

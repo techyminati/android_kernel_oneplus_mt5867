@@ -12,6 +12,7 @@
  *  Richard Purdie <rpurdie@openedhand.com>
  */
 
+#include <linux/version.h>
 
 /* Version
  * 0: original lzo version

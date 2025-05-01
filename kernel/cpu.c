@@ -1613,6 +1613,9 @@ void __weak arch_thaw_secondary_cpus_end(void)
 {
 }
 
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING) || defined(CONFIG_MP_PLATFORM_ARM_32bit_PORTING)
+extern void smp_clear_magic(void);
+#endif
 void thaw_secondary_cpus(void)
 {
 	int cpu, error;

@@ -39,6 +39,10 @@
 #include <linux/mtd/nand-ecc-sw-bch.h>
 #include <linux/interrupt.h>
 #include <linux/bitops.h>
+#include <mstar/mpatch_macro.h>
+#if (defined(CONFIG_MSTAR_NAND) || defined(CONFIG_MSTAR_SPI_NAND)) && (MP_NAND_MTD == 1)
+#include <linux/crc32.h>
+#endif
 #include <linux/io.h>
 #include <linux/mtd/partitions.h>
 #include <linux/of.h>
@@ -46,6 +50,12 @@
 #include <linux/gpio/consumer.h>
 
 #include "internals.h"
+#if defined(CONFIG_MSTAR_NAND) && (MP_NAND_MTD == 1)
+#include "drvNAND.h"
+#endif
+#if defined(CONFIG_MSTAR_SPI_NAND) && (MP_NAND_MTD == 1)
+#include "spinand.h"
+#endif
 
 static int nand_pairing_dist3_get_info(struct mtd_info *mtd, int page,
 				       struct mtd_pairing_info *info)
@@ -117,12 +127,10 @@ static int check_offs_len(struct nand_chip *chip, loff_t ofs, uint64_t len)
 }
 
 /**
- * nand_extract_bits - Copy unaligned bits from one buffer to another one
- * @dst: destination buffer
- * @dst_off: bit offset at which the writing starts
- * @src: source buffer
- * @src_off: bit offset at which the reading starts
- * @nbits: number of bits to copy from @src to @dst
+ * nand_read_byte16 - [DEFAULT] read one byte endianness aware from the chip
+ * @mtd: MTD device structure
+ *
+ * Default read function for 16bit buswidth with endianness conversion.
  *
  * Copy bits from one memory region to another (overlap authorized).
  */
@@ -207,7 +215,11 @@ EXPORT_SYMBOL_GPL(nand_deselect_target);
  *
  * Release chip lock and wake up anyone waiting on the device.
  */
+#if defined(CONFIG_MSTAR_NAND) && (MP_NAND_MTD == 1)
+void nand_release_device(struct nand_chip *chip)
+#else
 static void nand_release_device(struct nand_chip *chip)
+#endif
 {
 	/* Release the controller and the chip */
 	mutex_unlock(&chip->controller->lock);
@@ -335,14 +347,18 @@ static int nand_isbad_bbm(struct nand_chip *chip, loff_t ofs)
  *
  * Return: -EBUSY if the chip has been suspended, 0 otherwise
  */
+ #if defined(CONFIG_MSTAR_NAND) && (MP_NAND_MTD == 1)
+int nand_get_device(struct nand_chip *chip)
+#else
 static void nand_get_device(struct nand_chip *chip)
+#endif
 {
 	/* Wait until the device is resumed. */
 	while (1) {
 		mutex_lock(&chip->lock);
 		if (!chip->suspended) {
 			mutex_lock(&chip->controller->lock);
-			return;
+			return 0;
 		}
 		mutex_unlock(&chip->lock);
 
@@ -365,6 +381,15 @@ static int nand_check_wp(struct nand_chip *chip)
 	/* Broken xD cards report WP despite being writable */
 	if (chip->options & NAND_BROKEN_XD)
 		return 0;
+
+#if (defined(CONFIG_MSTAR_NAND) || defined(CONFIG_MSTAR_SPI_NAND)) && (MP_NAND_MTD == 1)
+	/*
+ 	 * Some boards need a long time to read status and
+	 * we will clear WP before erase or wirte actually,
+	 * so we set WP bit ture always
+	*/
+	return 0;
+#endif
 
 	/* Check the WP bit */
 	ret = nand_status_op(chip, &status);
@@ -621,7 +646,11 @@ static int nand_block_isreserved(struct mtd_info *mtd, loff_t ofs)
  * Check, if the block is bad. Either by reading the bad block table or
  * calling of the scan function.
  */
+#if defined(CONFIG_MSTAR_NAND) && (MP_NAND_MTD == 1)
+int nand_block_checkbad(struct nand_chip *chip, loff_t ofs, int allowbbt)
+#else
 static int nand_block_checkbad(struct nand_chip *chip, loff_t ofs, int allowbbt)
+#endif
 {
 	/* Return info from the table */
 	if (chip->bbt)
@@ -3327,8 +3356,13 @@ static int nand_read_page_syndrome(struct nand_chip *chip, uint8_t *buf,
  * @ops: oob ops structure
  * @len: size of oob to transfer
  */
+#if defined(CONFIG_MSTAR_NAND) && (MP_NAND_MTD == 1)
+uint8_t *nand_transfer_oob(struct nand_chip *chip, uint8_t *oob,
+				  struct mtd_oob_ops *ops, size_t len)
+#else
 static uint8_t *nand_transfer_oob(struct nand_chip *chip, uint8_t *oob,
 				  struct mtd_oob_ops *ops, size_t len)
+#endif
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	int ret;
@@ -5169,6 +5203,92 @@ free_detect_allocation:
 	return ret;
 }
 
+
+#if defined(CONFIG_MSTAR_NAND) && (MP_NAND_MTD == 1)
+extern void* drvNAND_get_DrvContext_address(void);
+/*
+ * Get the flash and manufacturer id and lookup if the type is supported
+ */
+static int nand_detect_mstar(struct nand_chip *chip, struct nand_flash_dev *type)
+{
+    NAND_DRIVER *pNandDrv = (NAND_DRIVER*)drvNAND_get_DrvContext_address();
+	struct mtd_info *mtd = nand_to_mtd(chip);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+	struct nand_device *base = &chip->base;
+	struct nand_ecc_props requirements = {};
+	u64 targetsize;
+	struct nand_memory_organization *memorg;
+#endif
+    #if defined(CONFIG_MSTAR_RESERVED_END_OF_NAND) && CONFIG_MSTAR_RESERVED_END_OF_NAND
+    int Secure_Reserved_Block;
+    #endif
+    if (!mtd->name)
+        mtd->name = "edb64M-nand";
+
+	memcpy(chip->id.data, pNandDrv->au8_ID, pNandDrv->u8_IDByteCnt);
+	chip->id.len = pNandDrv->u8_IDByteCnt;
+
+    mtd->writesize = pNandDrv->u16_PageByteCnt * pNandDrv->u8_PlaneCnt;
+    mtd->oobsize = pNandDrv->u16_SpareByteCnt * pNandDrv->u8_PlaneCnt;
+
+    mtd->erasesize = pNandDrv->u16_BlkPageCnt * pNandDrv->u16_PageByteCnt * pNandDrv->u8_PlaneCnt;
+
+    mtd->bitflip_threshold = pNandDrv->u16_BitflipThreshold;
+
+    targetsize = (uint64_t)pNandDrv->u16_BlkCnt * (uint64_t)pNandDrv->u16_BlkPageCnt * (uint64_t)pNandDrv->u16_PageByteCnt;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+    requirements.step_size =  pNandDrv->u16_ECCCorretableBit;
+    requirements.strength = pNandDrv->u16_PageByteCnt * pNandDrv->u8_PlaneCnt;
+    nanddev_set_ecc_requirements(base, &requirements);
+	memorg = nanddev_get_memorg(&chip->base);
+#else
+    chip->ecc_strength_ds = pNandDrv->u16_ECCCorretableBit;
+    chip->ecc_step_ds = pNandDrv->u16_PageByteCnt * pNandDrv->u8_PlaneCnt;
+#endif
+
+    if(pNandDrv->u8_WordMode)
+        chip->options |= NAND_BUSWIDTH_16;
+
+    #ifdef CONFIG_MTD_NAND_FLASH_BASE_BBT
+    chip->options |= NAND_BBT_USE_FLASH;
+    #else
+    chip->options &= ~NAND_BBT_USE_FLASH;
+    #endif
+
+    memorg->bits_per_cell = 1;
+    //chip->bits_per_cell = 1;
+
+    /* Calculate the address shift from the page size */
+    chip->page_shift = ffs(mtd->writesize) - 1;
+    /* Convert targetsize to number of pages per chip -1. */
+    chip->pagemask = (targetsize >> chip->page_shift) - 1;
+
+    chip->bbt_erase_shift = chip->phys_erase_shift =
+        ffs(mtd->erasesize) - 1;
+    if (targetsize & 0xffffffff)
+        chip->chip_shift = ffs((unsigned)targetsize) - 1;
+    else
+        chip->chip_shift = ffs((unsigned)(targetsize >> 32)) + 31;
+
+    chip->badblockbits = 8;
+
+    /* Set the bad block position */
+    chip->badblockpos = mtd->writesize > 512 ?
+        NAND_LARGE_BADBLOCK_POS : NAND_SMALL_BADBLOCK_POS;
+    //chip->erase = single_erase;
+    /* set bbt block number to 0.8% of total blocks, or blocks * (2 / 256) */
+    chip->bbt_td->maxblocks = (((targetsize >> chip->phys_erase_shift) >> 8) * 2);
+    #if defined(CONFIG_MSTAR_RESERVED_END_OF_NAND) && CONFIG_MSTAR_RESERVED_END_OF_NAND
+    Secure_Reserved_Block = (CONFIG_MSTAR_RESERVED_NAND_BYTE + (1 << chip->bbt_erase_shift) - 1) >> chip->bbt_erase_shift;
+    chip->bbt_td->maxblocks += Secure_Reserved_Block;
+    #endif
+    chip->bbt_md->maxblocks = chip->bbt_td->maxblocks;
+
+    return 0;
+}
+#endif
+
 static enum nand_ecc_engine_type
 of_get_rawnand_ecc_engine_type_legacy(struct device_node *np)
 {
@@ -5414,7 +5534,7 @@ static int rawnand_dt_init(struct nand_chip *chip)
  * prevented dynamic allocations during this phase which was unconvenient and
  * as been banned for the benefit of the ->init_ecc()/cleanup_ecc() hooks.
  */
-static int nand_scan_ident(struct nand_chip *chip, unsigned int maxchips,
+int nand_scan_ident(struct nand_chip *chip, unsigned int maxchips,
 			   struct nand_flash_dev *table)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
@@ -5430,6 +5550,26 @@ static int nand_scan_ident(struct nand_chip *chip, unsigned int maxchips,
 
 	mutex_init(&chip->lock);
 	init_waitqueue_head(&chip->resume_wq);
+#if (defined(CONFIG_MSTAR_NAND) || defined(CONFIG_MSTAR_SPI_NAND)) && (MP_NAND_MTD == 1)
+	#if defined(CONFIG_MSTAR_NAND)
+	if(!(chip->options & NAND_IS_SPI))
+	{
+		nand_set_defaults(chip);
+
+		ret = nand_detect_mstar(chip, table);
+		if (ret)
+			return ret;
+
+		i = 1;
+	}
+	else
+	{
+		i = 0;
+	}
+	#else //defined(CONFIG_MSTAR_SPI_NAND)
+	i = 0;
+	#endif
+#else
 
 	/* Enforce the right timings for reset/detection */
 	chip->current_interface_config = nand_get_reset_interface_config();
@@ -5485,6 +5625,7 @@ static int nand_scan_ident(struct nand_chip *chip, unsigned int maxchips,
 		}
 		nand_deselect_target(chip);
 	}
+#endif
 	if (i > 1)
 		pr_info("%d chips detected\n", i);
 
@@ -5494,6 +5635,7 @@ static int nand_scan_ident(struct nand_chip *chip, unsigned int maxchips,
 
 	return 0;
 }
+EXPORT_SYMBOL(nand_scan_ident);
 
 static void nand_scan_ident_cleanup(struct nand_chip *chip)
 {

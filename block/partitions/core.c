@@ -13,12 +13,26 @@
 #include <linux/blktrace_api.h>
 #include <linux/raid/detect.h>
 #include "check.h"
+#ifdef CONFIG_MSTAR_CHIP
+#include "emmc.h"
+#include "part_ufs.h"
+#endif
 
+int warn_no_part = 1; /*This is ugly: should make genhd removable media aware*/
 static int (*check_part[])(struct parsed_partitions *) = {
 	/*
 	 * Probe partition formats with tables at disk address 0
 	 * that also have an ADFS boot block at 0xdc0.
 	 */
+#ifdef CONFIG_MSTAR_CHIP
+#if defined (CONFIG_EMMC_PARTITION)
+	emmc_partition,
+#endif
+#if defined (CONFIG_UFS_PARTITION)
+	ufs_partition,
+#endif
+#endif
+
 #ifdef CONFIG_ACORN_PARTITION_ICS
 	adfspart_check_ICS,
 #endif
@@ -41,9 +55,10 @@ static int (*check_part[])(struct parsed_partitions *) = {
 #ifdef CONFIG_ACORN_PARTITION_ADFS
 	adfspart_check_ADFS,
 #endif
-
+#ifndef CONFIG_MSTAR_CHIP
 #ifdef CONFIG_CMDLINE_PARTITION
 	cmdline_partition,
+#endif
 #endif
 #ifdef CONFIG_EFI_PARTITION
 	efi_partition,		/* this must come before msdos */
@@ -169,12 +184,20 @@ static struct parsed_partitions *check_partition(struct gendisk *hd)
 	 */
 	if (err)
 		res = err;
+		
+#ifdef CONFIG_MSTAR_CHIP
+	if (!res)
+		strlcat(state->pp_buf, " unknown partition table\n", PAGE_SIZE);
+	else if (warn_no_part)
+		strlcat(state->pp_buf, " unable to read partition table\n", PAGE_SIZE);
+	printk(KERN_INFO "%s", state->pp_buf);
+#else
 	if (res) {
 		strlcat(state->pp_buf,
 			" unable to read partition table\n", PAGE_SIZE);
 		printk(KERN_INFO "%s", state->pp_buf);
 	}
-
+#endif
 	free_page((unsigned long)state->pp_buf);
 	free_partitions(state);
 	return ERR_PTR(res);

@@ -431,7 +431,6 @@ void __init dma_contiguous_remap(void)
 
 		flush_tlb_kernel_range(__phys_to_virt(start),
 				       __phys_to_virt(end));
-
 		iotable_init(&map, 1);
 	}
 }
@@ -663,7 +662,11 @@ static void *__dma_alloc(struct device *dev, size_t size, dma_addr_t *handle,
 			 gfp_t gfp, pgprot_t prot, bool is_coherent,
 			 unsigned long attrs, const void *caller)
 {
-	u64 mask = min_not_zero(dev->coherent_dma_mask, dev->bus_dma_limit);
+	u64 mask;
+	if(!dev)
+		mask = (u64)DMA_BIT_MASK(32);
+	else
+		mask = min_not_zero(dev->coherent_dma_mask, dev->bus_dma_limit);
 	struct page *page = NULL;
 	void *addr;
 	bool allowblock, cma;

@@ -42,10 +42,24 @@
 
 #include <trace/hooks/mm.h>
 
+#include <trace/hooks/mm.h>
+
 #define NO_BLOCK_MAPPINGS	BIT(0)
 #define NO_CONT_MAPPINGS	BIT(1)
 #define NO_EXEC_MAPPINGS	BIT(2)	/* assumes FEAT_HPDS is not used */
+#if defined(CONFIG_MSTAR_ARM)
+#include <asm/mach/arch.h>
+#include <asm/mach/map.h>
 
+/*
+ * Global variable to indicate if paging_init be excuted
+ */
+volatile u64 is_paging_init = 0;
+volatile void __iomem *UART_BASE;
+
+/* temp, we do not calculate the arm_lowmem_limit in 64_bit */
+phys_addr_t arm_lowmem_limit __initdata = 0;
+#endif
 u64 idmap_t0sz = TCR_T0SZ(VA_BITS_MIN);
 u64 idmap_ptrs_per_pgd = PTRS_PER_PGD;
 
@@ -842,6 +856,11 @@ void __init paging_init(void)
 	map_kernel(pgdp);
 	map_mem(pgdp);
 
+#if (MP_PLATFORM_ARM_64bit_PORTING == 1)
+	is_paging_init = 1;
+	UART_BASE = early_ioremap(0x00000001f200000, PAGE_SIZE);
+#endif
+
 	pgd_clear_fixmap();
 
 	cpu_replace_ttbr1(lm_alias(swapper_pg_dir));
@@ -851,6 +870,15 @@ void __init paging_init(void)
 		      __pa_symbol(init_pg_end) - __pa_symbol(init_pg_dir));
 
 	memblock_allow_resize();
+}
+
+/*
+ * Enable the identity mapping to allow the MMU disabling.
+ */
+void setup_mm_for_reboot(void)
+{
+    cpu_switch_mm(idmap_pg_dir, &init_mm);
+    flush_tlb_all();
 }
 
 /*

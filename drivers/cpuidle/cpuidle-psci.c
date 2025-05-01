@@ -296,6 +296,29 @@ static int psci_dt_cpu_init_idle(struct device *dev, struct cpuidle_driver *drv,
 	data->psci_states = psci_states;
 	return 0;
 }
+//Fix me dts compatible = "arm,psci-1.0"; && "psci-cpuidle"
+int mstar_psci_cpu_init_idle(unsigned int cpu)
+{
+	struct device_node *cpu_node;
+	int ret;
+
+	/*
+	 * If the PSCI cpu_suspend function hook has not been initialized
+	 * idle states must not be enabled, so bail out
+	 */
+	if (!psci_ops.cpu_suspend)
+		return -EOPNOTSUPP;
+
+	cpu_node = of_get_cpu_node(cpu, NULL);
+	if (!cpu_node)
+		return -ENODEV;
+
+	//ret = psci_dt_cpu_init_idle(cpu_node, cpu);
+
+	of_node_put(cpu_node);
+
+	return ret;
+}
 
 static int psci_cpu_init_idle(struct device *dev, struct cpuidle_driver *drv,
 			      unsigned int cpu, unsigned int state_count)

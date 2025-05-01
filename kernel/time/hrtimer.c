@@ -45,7 +45,11 @@
 #include <linux/uaccess.h>
 
 #include <trace/events/timer.h>
+#if defined(CONFIG_MP_HRT_TIMER_ENABLE)
+long (*hrtimer_patch_function)(struct timespec64 *tu) =NULL;
 
+EXPORT_SYMBOL_GPL(hrtimer_patch_function);
+#endif
 #include "tick-internal.h"
 
 /*
@@ -2112,6 +2116,9 @@ out:
 	destroy_hrtimer_on_stack(&t.timer);
 	return ret;
 }
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+EXPORT_SYMBOL(hrtimer_nanosleep);
+#endif
 
 #ifdef CONFIG_64BIT
 

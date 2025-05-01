@@ -47,10 +47,13 @@
 #include <asm/virt.h>
 #include <asm/mach/arch.h>
 #include <asm/mpu.h>
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+#include <chip_setup.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/ipi.h>
-
+#include "mdrv_types.h"
 EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_raise);
 EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_entry);
 EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_exit);
@@ -61,6 +64,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_exit);
  * where to place its SVC stack
  */
 struct secondary_data secondary_data;
+volatile int pen_release = -1;
 
 enum ipi_msg_type {
 	IPI_WAKEUP,
@@ -492,7 +496,9 @@ void __init smp_cpus_done(unsigned int max_cpus)
 
 void __init smp_prepare_boot_cpu(void)
 {
+	unsigned long off;
 	set_my_cpu_offset(per_cpu_offset(smp_processor_id()));
+	off = __my_cpu_offset;
 }
 
 void __init smp_prepare_cpus(unsigned int max_cpus)
@@ -791,6 +797,23 @@ int setup_profiling_timer(unsigned int multiplier)
 {
 	return -EINVAL;
 }
+
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+void smp_clear_magic(void)
+{
+	writel(0x0, SECOND_MAGIC_NUMBER_ADRESS);
+	writel(0x0, SECOND_START_ADDR);
+	writel(0x0, SECOND_START_ADDR + 4);
+
+	if (TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE) {
+		// entry point put in 0x20201004
+		writel_relaxed(0x0, (void*)PAGE_OFFSET + 0x1004);
+		// magic put in 0x20201000
+		writel_relaxed(0x0, (void*)PAGE_OFFSET + 0x1000);
+	}
+	__cpuc_flush_kern_all();
+}
+#endif
 
 #ifdef CONFIG_CPU_FREQ
 

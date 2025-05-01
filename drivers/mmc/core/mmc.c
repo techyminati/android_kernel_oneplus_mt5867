@@ -16,6 +16,9 @@
 #include <linux/mmc/host.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/mmc.h>
+#ifdef CONFIG_MSTAR_CHIP
+#include <linux/kthread.h>
+#endif
 #include <trace/hooks/mmc.h>
 
 #include "core.h"
@@ -450,7 +453,11 @@ static int mmc_decode_ext_csd(struct mmc_card *card, u8 *ext_csd)
 				part_size = ext_csd[EXT_CSD_BOOT_MULT] << 17;
 				mmc_part_add(card, part_size,
 					EXT_CSD_PART_CONFIG_ACC_BOOT0 + idx,
+#ifdef CONFIG_MSTAR_CHIP
+					"boot%d", idx, false,
+#else
 					"boot%d", idx, true,
+#endif
 					MMC_BLK_DATA_AREA_BOOT);
 			}
 		}
@@ -2184,11 +2191,37 @@ static int mmc_shutdown(struct mmc_host *host)
 	return err;
 }
 
+#ifdef CONFIG_MSTAR_CHIP
+/*
+ * Create mmc resume thread for str performance,
+ * it should be OK since mmc resume use runtime method,
+ * which means resume anytime
+*/
+static int mmc_resume_thread(void *data)
+{
+	int err;
+	struct mmc_host *host = (struct mmc_host *)data;
+
+	err = _mmc_resume(host);
+	if (err && err != -ENOMEDIUM)
+		pr_err("%s: error %d doing resume\n",
+			mmc_hostname(host), err);
+
+	return 0;
+}
+#endif
+
 /*
  * Callback for resume.
  */
 static int mmc_resume(struct mmc_host *host)
 {
+#ifdef CONFIG_MSTAR_CHIP
+    int err = _mmc_resume(host);	
+    if (err && err != -ENOMEDIUM)
+       pr_err("%s: error %d doing runtime resume\n",
+               mmc_hostname(host), err);
+#endif
 	pm_runtime_enable(&host->card->dev);
 	return 0;
 }
@@ -2217,6 +2250,11 @@ static int mmc_runtime_suspend(struct mmc_host *host)
 static int mmc_runtime_resume(struct mmc_host *host)
 {
 	int err;
+
+#ifdef CONFIG_MSTAR_CHIP
+	if (!(host->caps & MMC_CAP_RUNTIME_RESUME))
+		return 0;
+#endif
 
 	err = _mmc_resume(host);
 	if (err && err != -ENOMEDIUM)

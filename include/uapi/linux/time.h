@@ -5,7 +5,6 @@
 #include <linux/types.h>
 #include <linux/time_types.h>
 
-#ifndef __KERNEL__
 #ifndef _STRUCT_TIMESPEC
 #define _STRUCT_TIMESPEC
 struct timespec {
@@ -14,11 +13,8 @@ struct timespec {
 };
 #endif
 
-struct timeval {
-	__kernel_old_time_t	tv_sec;		/* seconds */
-	__kernel_suseconds_t	tv_usec;	/* microseconds */
-};
 
+#ifndef __KERNEL__
 struct itimerspec {
 	struct timespec it_interval;/* timer period */
 	struct timespec it_value;	/* timer expiration */
@@ -71,5 +67,9 @@ struct timezone {
  * The various flags for setting POSIX.1b interval timers:
  */
 #define TIMER_ABSTIME			0x01
+struct timeval {
+	__kernel_old_time_t	tv_sec;		/* seconds */
+	__kernel_suseconds_t	tv_usec;	/* microseconds */
+};
 
 #endif /* _UAPI_LINUX_TIME_H */

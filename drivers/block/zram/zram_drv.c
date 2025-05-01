@@ -15,6 +15,7 @@
 #define KMSG_COMPONENT "zram"
 #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
 
+#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/bio.h>
@@ -42,7 +43,8 @@ static DEFINE_IDR(zram_index_idr);
 static DEFINE_MUTEX(zram_index_mutex);
 
 static int zram_major;
-static const char *default_compressor = CONFIG_ZRAM_DEF_COMP;
+//using mzc_hybrid
+static const char *default_compressor = "mzc_hybrid";
 
 /* Module params (documentation at end) */
 static unsigned int num_devices = 1;
@@ -1008,9 +1010,10 @@ static ssize_t comp_algorithm_store(struct device *dev,
 	if (sz > 0 && compressor[sz - 1] == '\n')
 		compressor[sz - 1] = 0x00;
 
-	if (!zcomp_available_algorithm(compressor))
+	if (!zcomp_available_algorithm(compressor)) {
+		pr_info("compression algo not found!\n");
 		return -EINVAL;
-
+	}
 	down_write(&zram->init_lock);
 	if (init_done(zram)) {
 		up_write(&zram->init_lock);
@@ -1220,8 +1223,13 @@ out:
 	atomic64_dec(&zram->stats.pages_stored);
 	zram_set_handle(zram, index, 0);
 	zram_set_obj_size(zram, index, 0);
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	WARN_ON_ONCE(zram->table[index].flags &
+		~(1UL << ZRAM_LOCK | 1UL << ZRAM_UNDER_WB | 1UL << ZRAM_IS_MZC));
+#else
 	WARN_ON_ONCE(zram->table[index].flags &
 		~(1UL << ZRAM_LOCK | 1UL << ZRAM_UNDER_WB));
+#endif
 }
 
 static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
@@ -1273,6 +1281,9 @@ static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
 		ret = 0;
 	} else {
 		dst = kmap_atomic(page);
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+		zstrm->tfm->base.is_mzc = zram_test_flag(zram, index, ZRAM_IS_MZC);
+#endif
 		ret = zcomp_decompress(zstrm, src, size, dst);
 		kunmap_atomic(dst);
 		zcomp_stream_put(zram->comp);
@@ -1332,6 +1343,9 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
 	struct page *page = bvec->bv_page;
 	unsigned long element = 0;
 	enum zram_pageflags flags = 0;
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	int orig_algo = INITIAL_VALUE;
+#endif
 
 	mem = kmap_atomic(page);
 	if (page_same_filled(mem, &element)) {
@@ -1346,6 +1360,12 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
 compress_again:
 	zstrm = zcomp_stream_get(zram->comp);
 	src = kmap_atomic(page);
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	if (!handle)
+		zstrm->tfm->base.is_mzc = INITIAL_VALUE;
+	else
+		zstrm->tfm->base.is_mzc = orig_algo;
+#endif
 	ret = zcomp_compress(zstrm, src, &comp_len);
 	kunmap_atomic(src);
 
@@ -1355,6 +1375,10 @@ compress_again:
 		zs_free(zram->mem_pool, handle);
 		return ret;
 	}
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	if (orig_algo == INITIAL_VALUE)
+		orig_algo = zstrm->tfm->base.is_mzc;
+#endif
 
 	if (comp_len >= huge_class_size)
 		comp_len = PAGE_SIZE;
@@ -1417,6 +1441,14 @@ out:
 	 */
 	zram_slot_lock(zram, index);
 	zram_free_page(zram, index);
+	
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	if (orig_algo == MZC) {
+		zram_set_flag(zram, index, ZRAM_IS_MZC);
+	} else {
+		zram_clear_flag(zram, index, ZRAM_IS_MZC);
+	}
+#endif
 
 	if (comp_len == PAGE_SIZE) {
 		zram_set_flag(zram, index, ZRAM_HUGE);
@@ -1905,6 +1937,20 @@ static int zram_add(void)
 	init_rwsem(&zram->init_lock);
 #ifdef CONFIG_ZRAM_WRITEBACK
 	spin_lock_init(&zram->wb_limit_lock);
+#endif
+#ifdef CONFIG_MP_ZSM
+	if (PAGE_SIZE > 4096) {
+		pr_err("[ZSM] The ZSM implementation is for 4KB page size, "
+				"ZRAM_FLAG_SHIFT=%d and zram_table_entry "
+				"need your attention.\n",
+				ZRAM_FLAG_SHIFT);
+		BUG_ON(1);
+	}
+	zram->zsm_on = true;
+	pr_alert("[ZSM] ZRAM compiled with ZSM, and zsm_on=%d.\n", zram->zsm_on);
+	pr_alert("[ZSM] Turn on ZSM by $echo 1 > /sys/block/zram0/zsm_on "
+			"before change the ZRAM disksize.\n");
+	pr_alert("[ZSM] Check ZSM on/off by $cat /sys/block/zram0/zsm_on\n");
 #endif
 
 	/* gendisk structure */

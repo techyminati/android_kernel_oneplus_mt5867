@@ -55,6 +55,10 @@
 #include <asm/hypervisor.h>
 #include <asm/xen/hypervisor.h>
 #include <asm/mmu_context.h>
+#ifdef CONFIG_MP_MMA_ENABLE
+//#include <linux/dma-contiguous.h>
+#endif
+#include <mstar/mpatch_macro.h>
 
 static int num_standard_resources;
 static struct resource *standard_resources;
@@ -290,6 +294,15 @@ arch_initcall(reserve_memblock_reserved_regions);
 
 u64 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = INVALID_HWID };
 
+extern void early_putstr(const char *fmt, ...);
+extern void __init prom_meminit(void);
+volatile unsigned int lx_num = 0;
+extern volatile void __iomem *UART_BASE;
+#ifdef CONFIG_BLK_DEV_INITRD
+extern char* cmd_ptr;
+#else
+char *cmd_ptr;
+#endif
 u64 cpu_logical_map(unsigned int cpu)
 {
 	return __cpu_logical_map[cpu];
@@ -297,6 +310,9 @@ u64 cpu_logical_map(unsigned int cpu)
 
 void __init __no_sanitize_address setup_arch(char **cmdline_p)
 {
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 1)
+	extern unsigned long __cmdline;
+#endif
 	setup_initial_init_mm(_stext, _etext, _edata, _end);
 
 	*cmdline_p = boot_command_line;
@@ -313,6 +329,10 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	setup_machine_fdt(__fdt_pointer);
 
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB
+	cmd_ptr = (char *)__cmdline;
+	strlcpy(boot_command_line, (char*)__phys_to_kimg(cmd_ptr), COMMAND_LINE_SIZE);
+#endif
 	/*
 	 * Initialise the static keys early as they may be enabled by the
 	 * cpufeature code and early parameters.
@@ -320,6 +340,9 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	jump_label_init();
 	parse_early_param();
 
+#if (MP_PLATFORM_ARM == 1)
+	prom_meminit();
+#endif
 	dynamic_scs_init();
 
 	/*
@@ -359,6 +382,9 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	request_standard_resources();
 
+#if (MP_PLATFORM_ARM_64bit_PORTING == 1)
+	early_iounmap((void *)UART_BASE, PAGE_SIZE);
+#endif
 	early_ioremap_reset();
 
 	if (acpi_disabled)
@@ -418,6 +444,16 @@ static int __init topology_init(void)
 }
 subsys_initcall(topology_init);
 
+#ifdef CONFIG_PLAT_MSTAR
+unsigned int get_cpu_midr(int cpu)
+{
+        struct cpuinfo_arm64 *cpuinfo = &per_cpu(cpu_data, cpu);
+        u32 midr = cpuinfo->reg_midr;
+
+    return midr;
+}
+EXPORT_SYMBOL(get_cpu_midr);
+#endif
 static void dump_kernel_offset(void)
 {
 	const unsigned long offset = kaslr_offset();

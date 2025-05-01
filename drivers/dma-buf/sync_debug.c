@@ -7,7 +7,7 @@
 
 #include <linux/debugfs.h>
 #include "sync_debug.h"
-
+#ifndef CONFIG_DEBUG_FS
 static struct dentry *dbgfs;
 
 static LIST_HEAD(sync_timeline_list_head);
@@ -32,7 +32,7 @@ void sync_timeline_debug_remove(struct sync_timeline *obj)
 	list_del(&obj->sync_timeline_list);
 	spin_unlock_irqrestore(&sync_timeline_list_lock, flags);
 }
-
+#else
 void sync_file_debug_add(struct sync_file *sync_file)
 {
 	unsigned long flags;
@@ -188,3 +188,4 @@ static __init int sync_debugfs_init(void)
 	return 0;
 }
 late_initcall(sync_debugfs_init);
+#endif

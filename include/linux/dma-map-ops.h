@@ -396,4 +396,18 @@ static inline void debug_dma_dump_mappings(struct device *dev)
 
 extern const struct dma_map_ops dma_dummy_ops;
 
+#ifdef CONFIG_CMA
+static inline void dev_set_cma_area(struct device *dev, struct cma *cma)
+{
+	if (dev)
+		dev->cma_area = cma;
+}
+
+static inline void dma_contiguous_set_default(struct cma *cma)
+{
+	dma_contiguous_default_area = cma;
+}
+#endif
+
 #endif /* _LINUX_DMA_MAP_OPS_H */
+

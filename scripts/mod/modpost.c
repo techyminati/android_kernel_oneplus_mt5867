@@ -42,6 +42,8 @@ static int allow_missing_ns_imports;
 
 static bool error_occurred;
 
+static int module_license_warn_only = 0;
+
 /*
  * Cut off the warnings when there are too many. This typically occurs when
  * vmlinux is missing. ('make modules' without building vmlinux.)
@@ -1977,7 +1979,10 @@ static void read_symbols(const char *modname)
 	if (!mod->is_vmlinux) {
 		license = get_modinfo(&info, "license");
 		if (!license)
-			error("missing MODULE_LICENSE() in %s\n", modname);
+			if (module_license_warn_only)
+				warn("missing MODULE_LICENSE() in %s\n", modname);
+			else
+				error("missing MODULE_LICENSE() in %s\n", modname);
 		while (license) {
 			if (license_is_gpl_compatible(license))
 				mod->gpl_compatible = 1;
@@ -2484,7 +2489,7 @@ int main(int argc, char **argv)
 	struct dump_list *dump_read_start = NULL;
 	struct dump_list **dump_read_iter = &dump_read_start;
 
-	while ((opt = getopt(argc, argv, "ei:mnT:o:awENd:v:")) != -1) {
+	while ((opt = getopt(argc, argv, "ei:mnT:o:awENd:v:x")) != -1) {
 		switch (opt) {
 		case 'e':
 			external_module = 1;
@@ -2524,6 +2529,9 @@ int main(int argc, char **argv)
 			break;
 		case 'v':
 			strncpy(module_scmversion, optarg, sizeof(module_scmversion) - 1);
+			break;
+		case 'x':
+			module_license_warn_only = 1;
 			break;
 		default:
 			exit(1);

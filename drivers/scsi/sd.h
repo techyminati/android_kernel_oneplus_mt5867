@@ -67,6 +67,14 @@ enum {
 	SD_ZERO_WS10_UNMAP,	/* Use WRITE SAME(10) with UNMAP */
 };
 
+#if (MP_SCSI_MSTAR_SD_CARD_HOTPLUG == 1)
+#define POLLING_INTERVAL	1*HZ  //in jiffies
+struct polling_t {
+	int pid;
+	struct completion polling_done;
+};
+#endif
+
 /**
  * struct zoned_disk_info - Specific properties of a ZBC SCSI device.
  * @nr_zones: number of zones.
@@ -144,7 +152,10 @@ struct scsi_disk {
 	unsigned	urswrz : 1;
 	unsigned	security : 1;
 	unsigned	ignore_medium_access_errors : 1;
-
+#if (MP_SCSI_MSTAR_SD_CARD_HOTPLUG == 1)
+	struct polling_t   polling; //for polling media changed
+	struct task_struct *sd_task;
+#endif
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 };

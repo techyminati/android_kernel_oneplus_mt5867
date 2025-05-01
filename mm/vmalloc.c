@@ -327,6 +327,7 @@ int ioremap_page_range(unsigned long addr, unsigned long end,
 
 	return err;
 }
+EXPORT_SYMBOL_GPL(ioremap_page_range);
 
 static void vunmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 			     pgtbl_mod_mask *mask)
@@ -618,7 +619,7 @@ int vmap_pages_range_noflush(unsigned long addr, unsigned long end,
  * RETURNS:
  * 0 on success, -errno on failure.
  */
-static int vmap_pages_range(unsigned long addr, unsigned long end,
+int vmap_pages_range(unsigned long addr, unsigned long end,
 		pgprot_t prot, struct page **pages, unsigned int page_shift)
 {
 	int err;
@@ -627,6 +628,7 @@ static int vmap_pages_range(unsigned long addr, unsigned long end,
 	flush_cache_vmap(addr, end);
 	return err;
 }
+EXPORT_SYMBOL(vmap_pages_range);
 
 int is_vmalloc_or_module_addr(const void *x)
 {
@@ -850,6 +852,42 @@ static struct vmap_area *__find_vmap_area(unsigned long addr)
 
 	return NULL;
 }
+
+#ifdef CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL
+static DEFINE_SPINLOCK(purge_lock);
+int sysctl_lazy_vfree_tlb_flush_all_threshold = SZ_512M;
+static void __purge_vmap_area_lazy_simple(unsigned long start, unsigned long end)
+{
+	int nr = 0;
+
+	nr = (end - start) >> PAGE_SHIFT;
+
+	/*
+	 * If sync is 0 but force_flush is 1, we'll go sync anyway but callers
+	 * should not expect such behaviour. This just simplifies locking for
+	 * the case that isn't actually used at the moment anyway.
+	 */
+
+	if (!spin_trylock(&purge_lock))
+		return;
+
+	if (nr > (sysctl_lazy_vfree_tlb_flush_all_threshold >> PAGE_SHIFT))
+		flush_tlb_all();
+	else
+		flush_tlb_kernel_range(start, end);
+
+	spin_unlock(&purge_lock);
+}
+#endif
+
+#ifdef CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL
+void free_unmap_vmap_start_end(unsigned long start,unsigned long end)
+{
+	flush_cache_vunmap(start, end);
+	vunmap_range_noflush(start, end);
+	__purge_vmap_area_lazy_simple(start, end);
+}
+#endif
 
 /*
  * This function returns back addresses of parent node
@@ -2228,7 +2266,7 @@ void *vm_map_ram(struct page **pages, unsigned int count, int node)
 }
 EXPORT_SYMBOL(vm_map_ram);
 
-static struct vm_struct *vmlist __initdata;
+static struct vm_struct *vmlist __initdata = NULL;
 
 static inline unsigned int vm_area_page_order(struct vm_struct *vm)
 {
@@ -2272,6 +2310,7 @@ void __init vm_area_add_early(struct vm_struct *vm)
 	}
 	vm->next = *p;
 	*p = vm;
+
 }
 
 /**
@@ -2363,7 +2402,6 @@ void __init vmalloc_init(void)
 		init_llist_head(&p->list);
 		INIT_WORK(&p->wq, free_work);
 	}
-
 	/* Import existing vmlist entries. */
 	for (tmp = vmlist; tmp; tmp = tmp->next) {
 		va = kmem_cache_zalloc(vmap_area_cachep, GFP_NOWAIT);
@@ -2467,6 +2505,10 @@ struct vm_struct *__get_vm_area_caller(unsigned long size, unsigned long flags,
 	return __get_vm_area_node(size, 1, PAGE_SHIFT, flags, start, end,
 				  NUMA_NO_NODE, GFP_KERNEL, caller);
 }
+
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+EXPORT_SYMBOL(get_vm_area_caller);
+#endif
 
 /**
  * get_vm_area - reserve a contiguous kernel virtual area

@@ -74,6 +74,17 @@
 #include "scsi_priv.h"
 #include "scsi_logging.h"
 
+#if (MP_SCSI_MSTAR_SD_CARD_HOTPLUG == 1)
+#include <linux/version.h>
+#include <linux/buffer_head.h>
+#include <linux/kthread.h>
+#include <linux/freezer.h>
+#endif
+#if defined(CONFIG_PLAT_MSTAR)
+#include <linux/signal.h>
+#include <linux/sched/signal.h>
+#endif
+
 MODULE_AUTHOR("Eric Youngdale");
 MODULE_DESCRIPTION("SCSI disk (sd) driver");
 MODULE_LICENSE("GPL");
@@ -122,6 +133,15 @@ static void sd_read_capacity(struct scsi_disk *sdkp, unsigned char *buffer);
 static void scsi_disk_release(struct device *cdev);
 
 static DEFINE_IDA(sd_index_ida);
+
+#if (MP_SCSI_MSTAR_SD_CARD_HOTPLUG == 1)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36)
+static DEFINE_SEMAPHORE(sd_polling_thread_sem);
+static DEFINE_SEMAPHORE(lock_kernel_sem);
+#else
+static DECLARE_MUTEX(sd_polling_thread_sem);
+#endif
+#endif
 
 /* This semaphore is used to mediate the 0->1 reference get in the
  * face of object destruction (i.e. we can't allow a get on an
@@ -600,6 +620,10 @@ static struct class sd_disk_class = {
 	.dev_release	= scsi_disk_release,
 	.dev_groups	= sd_disk_groups,
 };
+
+#if (MP_SCSI_MSTAR_SD_CARD_HOTPLUG == 1)
+static int sd_polling_thread (void * data);
+#endif
 
 static const struct dev_pm_ops sd_pm_ops = {
 	.suspend		= sd_suspend_system,
@@ -1689,6 +1713,7 @@ out:
 	return disk_changed ? DISK_EVENT_MEDIA_CHANGE : 0;
 }
 
+#if (MP_SCSI_HD_SUSPEND == 0)
 static int sd_sync_cache(struct scsi_disk *sdkp, struct scsi_sense_hdr *sshdr)
 {
 	int retries, res;
@@ -1753,7 +1778,7 @@ static int sd_sync_cache(struct scsi_disk *sdkp, struct scsi_sense_hdr *sshdr)
 	}
 	return 0;
 }
-
+#endif
 static void sd_rescan(struct device *dev)
 {
 	struct scsi_disk *sdkp = dev_get_drvdata(dev);
@@ -3455,6 +3480,23 @@ static int sd_probe(struct device *dev)
 		gd->events |= DISK_EVENT_MEDIA_CHANGE;
 		gd->event_flags = DISK_EVENT_FLAG_POLL | DISK_EVENT_FLAG_UEVENT;
 	}
+#if (MP_SCSI_MSTAR_SD_CARD_HOTPLUG == 1)
+	if (sdp->removable){
+		init_completion(&sdkp->polling.polling_done);
+
+		//request mutex for creating polling thread(released mutex when the polling thread is creaeted)
+		down(&sd_polling_thread_sem);
+
+		//sdkp->polling.pid = kernel_thread(sd_polling_thread, (void *)sdkp, CLONE_VM);
+		sdkp->sd_task = kthread_run(sd_polling_thread, sdkp, "%s", "scsi-polling");
+		//if (sdkp->polling.pid < 0) {
+		if (IS_ERR(sdkp->sd_task)) {
+			//printk(" Unable to create sd_polling_thread !!\n");
+			up(&sd_polling_thread_sem);
+		}
+		sdkp->polling.pid = sdkp->sd_task->pid;
+	}
+#endif
 
 	blk_pm_runtime_init(sdp->request_queue, dev);
 	if (sdp->rpm_autosuspend) {
@@ -3490,6 +3532,122 @@ static int sd_probe(struct device *dev)
 	return error;
 }
 
+#if (MP_SCSI_MSTAR_SD_CARD_HOTPLUG == 1)
+static int sd_polling_thread (void * data){
+	struct scsi_disk    *sdkp = (struct scsi_disk *)data;
+	struct block_device *bdev = NULL;
+	int media_changed;
+	int privious_state = 0;
+	int len = 0;
+
+	BUG_ON(NULL == sdkp);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36)
+	down(&lock_kernel_sem);
+#else
+	lock_kernel();
+#endif
+
+//#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0)
+//	snprintf(current->comm, sizeof(current->comm), "scsi-sd-polling");
+//#else
+//	  daemonize("scsi-polling thread");
+//#endif
+	allow_signal(SIGTERM);
+	current->flags |= PF_NOFREEZE;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36)
+	up(&lock_kernel_sem);
+#else
+	unlock_kernel();
+#endif
+
+	//release mutex for other polling thread can be creaeted(the mutex is obtained in sd_probe)
+	up(&sd_polling_thread_sem);
+
+	while(1)
+	{
+		if(signal_pending(current))
+			complete_and_exit(&sdkp->polling.polling_done, 0);
+
+		//Use set_current_state has a possiable that wake up immediately. Replace by using msleep
+		//set_current_state(TASK_INTERRUPTIBLE);
+		//schedule_timeout(POLLING_INTERVAL);
+		msleep(1000);
+
+		media_changed = sd_check_events(sdkp->disk,0);
+
+		if(media_changed == privious_state)
+			continue;
+
+		//media changed
+		if(0 == media_changed)
+		{
+			printk("removable device connected! \n");
+			len = sdkp->disk->part_tbl->len;
+			if( 1 == len || (len > 1 && !sdkp->disk->part_tbl->part[1]) )
+			{
+				bdev = bdget_disk(sdkp->disk, 0);
+				if (NULL == bdev||NULL == sdkp->disk->queue)
+					continue;
+				bdev->bd_disk = sdkp->disk;
+				bdev->bd_contains = bdev;
+
+				BUG_ON(NULL == sdkp->disk->part_tbl->part[0]);
+
+				/*lock before using bdev*/
+				mutex_lock(&bdev->bd_mutex);
+				printk("rescan locked!!!!!!!\n");
+				rescan_partitions(sdkp->disk, bdev);		//re-get the partitions
+				mutex_unlock(&bdev->bd_mutex);
+				printk("rescan unlocked!!!!!!!!\n");
+
+				len = sdkp->disk->part_tbl->len;
+				if( 1 == len || (len > 1 && !sdkp->disk->part_tbl->part[1]) )
+					//kobject_uevent(&sdkp->disk->driverfs_dev->kobj, KOBJ_ADD);
+					kobject_uevent(&disk_to_dev(sdkp->disk)->kobj, KOBJ_ADD);
+			}
+		}
+		else
+		{
+			struct disk_part_iter piter;
+			struct hd_struct *part;
+
+			printk("removable device removed!\n");
+			BUG_ON(NULL == sdkp->disk->part_tbl->part[0]);
+
+			//N.B. If disk is sda,and only has sda,sdkp->disk->part_tbl->len is 1.
+			//If disk is sda,and has sdaA,sdaB,sdaC,...(here "A,B,C,.." are numeral),
+			//then sdkp->disk->part_tbl->len is the max value of (A,B,C,...) plus 1.
+			//printk("sdkp->disk->part_tbl->len=%d\n",sdkp->disk->part_tbl->len);
+			if(sdkp->disk->part_tbl->len > 1)
+			{
+				bdev = bdget_disk(sdkp->disk, 0);
+				if (NULL == bdev)
+					continue;
+
+				if(bdev)
+					bdev->bd_invalidated = 0;
+
+				disk_part_iter_init(&piter, sdkp->disk, DISK_PITER_INCL_EMPTY);
+				//mutex_lock_nested(&bdev->bd_mutex, 1);
+				mutex_lock(&bdev->bd_mutex);
+				while ((part = disk_part_iter_next(&piter)))
+					delete_partition(sdkp->disk, part->partno);
+				mutex_unlock(&bdev->bd_mutex);
+				disk_part_iter_exit(&piter);
+		   }
+		   else
+				kobject_uevent(&disk_to_dev(sdkp->disk)->kobj, KOBJ_REMOVE);
+		}
+
+		privious_state = media_changed;
+
+	}//while 1
+
+}
+#endif
+
 /**
  *	sd_remove - called whenever a scsi disk (previously recognized by
  *	sd_probe) is detached from the system. It is called (potentially
@@ -3504,11 +3662,28 @@ static int sd_probe(struct device *dev)
 static int sd_remove(struct device *dev)
 {
 	struct scsi_disk *sdkp;
+	dev_t devt;
+#if (MP_SCSI_MSTAR_SD_CARD_HOTPLUG == 1)
+	struct scsi_device *sdp;
+#endif
 
 	sdkp = dev_get_drvdata(dev);
 	scsi_autopm_get_device(sdkp->device);
 
 	async_synchronize_full_domain(&scsi_sd_pm_domain);
+#if (MP_SCSI_MSTAR_SD_CARD_HOTPLUG == 1)
+	sdp = to_scsi_device(dev);
+	if ((sdp != NULL) && (sdp->removable)) {
+		/* do nothing here, if we do not create a valid thread */
+		if (sdp->removable) {
+			down(&sd_polling_thread_sem);
+			kill_pid_info(SIGTERM, (struct siginfo *)1 ,(pid_t)sdkp->polling.pid);
+
+			up(&sd_polling_thread_sem);
+			wait_for_completion(&sdkp->polling.polling_done);
+		}
+	}
+#endif
 	device_del(&sdkp->dev);
 	del_gendisk(sdkp->disk);
 	sd_shutdown(dev);
@@ -3609,12 +3784,12 @@ static void sd_shutdown(struct device *dev)
 
 	if (pm_runtime_suspended(dev))
 		return;
-
+#if (MP_SCSI_HD_SUSPEND == 0)
 	if (sdkp->WCE && sdkp->media_present) {
 		sd_printk(KERN_NOTICE, sdkp, "Synchronizing SCSI cache\n");
 		sd_sync_cache(sdkp, NULL);
 	}
-
+#endif
 	if (system_state != SYSTEM_RESTART && sdkp->device->manage_start_stop) {
 		sd_printk(KERN_NOTICE, sdkp, "Stopping disk\n");
 		sd_start_stop_device(sdkp, 0);
@@ -3629,7 +3804,7 @@ static int sd_suspend_common(struct device *dev, bool ignore_stop_errors)
 
 	if (!sdkp)	/* E.g.: runtime suspend following sd_remove() */
 		return 0;
-
+#if (MP_SCSI_HD_SUSPEND == 0)
 	if (sdkp->WCE && sdkp->media_present) {
 		if (!sdkp->device->silence_suspend)
 			sd_printk(KERN_NOTICE, sdkp, "Synchronizing SCSI cache\n");
@@ -3652,7 +3827,7 @@ static int sd_suspend_common(struct device *dev, bool ignore_stop_errors)
 			ret = 0;
 		}
 	}
-
+#endif
 	if (sdkp->device->manage_start_stop) {
 		if (!sdkp->device->silence_suspend)
 			sd_printk(KERN_NOTICE, sdkp, "Stopping disk\n");

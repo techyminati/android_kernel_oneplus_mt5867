@@ -163,6 +163,8 @@ static __always_inline bool check_region_inline(unsigned long addr,
 						size_t size, bool write,
 						unsigned long ret_ip)
 {
+//	if ((void *) addr >= (void *) VMALLOC_START && (void *) addr < (void *) VMALLOC_END)
+//		return true;
 	if (!kasan_arch_is_ready())
 		return true;
 
@@ -210,6 +212,8 @@ void kasan_cache_shutdown(struct kmem_cache *cache)
 static void register_global(struct kasan_global *global)
 {
 	size_t aligned_size = round_up(global->size, KASAN_GRANULE_SIZE);
+  if ((void *) global->beg >= (void *) VMALLOC_START && (void *) global->beg < (void *) VMALLOC_END)
+		return;
 
 	kasan_unpoison(global->beg, global->size, false);
 

@@ -1,0 +1,9 @@
+menuconfig ION
+	tristate "Ion Memory Manager"
+	depends on HAS_DMA && MMU
+	help
+	  Choose this option to enable the ION Memory Manager,
+	  used by Android to efficiently allocate buffers
+	  from userspace that can be shared between drivers.
+	  If you're not using Android its probably safe to
+	  say N here.

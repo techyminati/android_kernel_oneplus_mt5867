@@ -635,7 +635,9 @@ int crypto_has_alg(const char *name, u32 type, u32 mask);
 struct crypto_tfm {
 
 	u32 crt_flags;
-
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	int is_mzc;
+#endif
 	int node;
 	
 	void (*exit)(struct crypto_tfm *tfm);

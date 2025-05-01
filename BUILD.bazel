@@ -6,7 +6,6 @@ load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
 load("//build/kernel/kleaf:common_kernels.bzl", "define_common_kernels")
 load(
     "//build/kernel/kleaf:kernel.bzl",
-    "checkpatch",
     "ddk_headers",
     "kernel_abi",
     "kernel_build",
@@ -34,11 +33,6 @@ _GKI_X86_64_MAKE_GOALS = [
     "bzImage",
     "modules",
 ]
-
-checkpatch(
-    name = "checkpatch",
-    checkpatch_pl = "scripts/checkpatch.pl",
-)
 
 # Deprecated - Use arch specific files from below.
 alias(
@@ -96,11 +90,13 @@ filegroup(
         "android/abi_gki_aarch64_db845c",
         "android/abi_gki_aarch64_exynos",
         "android/abi_gki_aarch64_fips140",
+        "android/abi_gki_aarch64_hisense",
         "android/abi_gki_aarch64_lenovo",
         "android/abi_gki_aarch64_mtkott",
         "android/abi_gki_aarch64_mtktv",
         "android/abi_gki_aarch64_oplus",
         "android/abi_gki_aarch64_pixel",
+        "android/abi_gki_aarch64_pixel_watch",
         "android/abi_gki_aarch64_qcom",
         "android/abi_gki_aarch64_rtkstb",
         "android/abi_gki_aarch64_rtktv",
@@ -776,7 +772,6 @@ ddk_headers(
         "drivers/usb/host/xhci-mvebu.h",
         "drivers/usb/host/xhci-plat.h",
         "drivers/usb/host/xhci-rcar.h",
-        "drivers/usb/typec/tcpm/tcpci.h",
     ],
     # The list of include directories where source files can #include headers
     # from. In other words, these are the `-I` option to the C compiler.

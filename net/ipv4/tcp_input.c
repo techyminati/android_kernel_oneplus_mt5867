@@ -81,6 +81,9 @@
 #include <net/busy_poll.h>
 #include <net/mptcp.h>
 #include <trace/hooks/net.h>
+#if  defined(CONFIG_NOE_NAT_HW)
+#include "../../drivers/mstar2/drv/noe/nat/hw_nat/mdrv_hwnat.h"
+#endif
 
 int sysctl_tcp_max_orphans __read_mostly = NR_FILE;
 
@@ -5831,7 +5834,23 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 	trace_tcp_probe(sk, skb);
 
 	tcp_mstamp_refresh(tp);
-	if (unlikely(!rcu_access_pointer(sk->sk_rx_dst)))
+#if  defined(CONFIG_NOE_NAT_HW)
+        if((FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_PCI) ||
+           (FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_WLAN) ||
+           (FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_GE)){
+           if(IS_SPACE_AVAILABLED_HEAD(skb))
+                FOE_MAGIC_TAG_HEAD(skb) = 0;
+        }
+        if((FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_PCI) ||
+           (FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_WLAN) ||
+           (FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_GE)){
+           if(IS_SPACE_AVAILABLED_TAIL(skb))
+                FOE_MAGIC_TAG_TAIL(skb) = 0;
+        }
+
+#endif
+
+	if (unlikely(!sk->sk_rx_dst))
 		inet_csk(sk)->icsk_af_ops->sk_rx_dst_set(sk, skb);
 	/*
 	 *	Header prediction.

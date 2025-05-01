@@ -929,7 +929,7 @@ bool __skb_flow_dissect(const struct net *net,
 	int mpls_lse = 0;
 	int num_hdrs = 0;
 	u8 ip_proto = 0;
-	bool ret;
+	bool ret = false;
 
 	if (!data) {
 		data = skb->data;

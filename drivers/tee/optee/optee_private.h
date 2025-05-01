@@ -11,6 +11,9 @@
 #include <linux/tee_drv.h>
 #include <linux/types.h>
 #include "optee_msg.h"
+#ifdef CONFIG_MSTAR_CHIP
+#include <linux/uuid.h>
+#endif
 
 #define OPTEE_MAX_ARG_SIZE	1024
 
@@ -103,6 +106,9 @@ struct optee {
 struct optee_session {
 	struct list_head list_node;
 	u32 session_id;
+#ifdef CONFIG_MSTAR_CHIP
+	uuid_t uuid;
+#endif
 };
 
 struct optee_context_data {

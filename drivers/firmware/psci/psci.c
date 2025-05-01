@@ -6,6 +6,7 @@
 
 #define pr_fmt(fmt) "psci: " fmt
 
+#include <linux/version.h>
 #include <linux/acpi.h>
 #include <linux/arm-smccc.h>
 #include <linux/cpuidle.h>
@@ -27,8 +28,38 @@
 #include <asm/system_misc.h>
 #include <asm/smp_plat.h>
 #include <asm/suspend.h>
+#ifdef CONFIG_MP_PLATFORM_ARM
+#include "mdrv_types.h"
+#endif
 #include <trace/hooks/psci.h>
 
+#ifdef CONFIG_MP_MSTAR_STR_BASE
+#include "mdrv_mpm.h"
+#endif
+
+#include "mdrv_tee_general.h"
+extern void Chip_Flush_Cache_All_Single(void);
+
+#ifdef CONFIG_MP_PLATFORM_ARM
+#define PSCI_POWER_STATE_TYPE_STANDBY		0
+#define PSCI_POWER_STATE_TYPE_POWER_DOWN	1
+
+#define PSCI_MSTAR_ARMv8_64BIT		0x0
+#define PSCI_MSTAR_ARMv8_32BIT		0x1
+#define PSCI_MSTAR_ARMv7_32BIT		0x3
+#define PSCI_MSTAR_ARM_MODE_MSAK	0xff
+
+#define PSCI_MSTAR_USER_DRIVER		0x0000
+#define PSCI_MSTAR_KERNEL_DRIVER	0x0100
+#define PSCI_MSTAR_DRIVER_MODE_MSAK	0xff00
+
+#define PSCI_MSTAR_PMU_NOT_SUPPORT	0x000000
+#define PSCI_MSTAR_PMU_SUPPORT		0x010000
+#define PSCI_MSTAR_PMU_MODE_MSAK	0xff0000
+
+#define PSCI_MSTAR_WFE		0
+#define PSCI_MSTAR_WFI		1
+#endif
 /*
  * While a 64-bit OS can make calls with SMC32 calling conventions, for some
  * calls it is necessary to use SMC64 to pass or return 64-bit values.
@@ -39,6 +70,11 @@
 #define PSCI_FN_NATIVE(version, name)	PSCI_##version##_FN64_##name
 #else
 #define PSCI_FN_NATIVE(version, name)	PSCI_##version##_FN_##name
+#endif
+
+#ifdef CONFIG_MP_PLATFORM_ARM
+uint32_t isPSCI = PSCI_RET_NOT_SUPPORTED;
+uint32_t isPMU_SUPPORT = PSCI_RET_SUCCESS;
 #endif
 
 /*
@@ -182,7 +218,48 @@ static int __psci_cpu_suspend(u32 fn, u32 state, unsigned long entry_point)
 	if (deny)
 		return -EPERM;
 
+#ifdef CONFIG_MP_PLATFORM_ARM
+	if(TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE) {
+	#if defined(CONFIG_MP_MSTAR_STR_BASE)
+		extern int is_mstar_str(void);
+
+		/*
+		 * Flusing cache before SMC to secure world,
+		 * to make sure calculating CRC is corret
+		*/
+		flush_cache_all();
+
+		// is_mstar_str == 1 means user-mode STR
+		if(!is_mstar_str()) {
+			//Kernel mode Utopia
+			if (MDrv_MPM_Check_DC())
+#ifdef MAX_CNT_STR
+				err = invoke_psci_fn(fn, state, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_KERNEL_DRIVER | PSCI_MSTAR_DISABLE_FBOOT);
+#else
+				err = invoke_psci_fn(fn, state, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_KERNEL_DRIVER | PSCI_MSTAR_AC_BOOT);
+#endif
+			else
+				err = invoke_psci_fn(fn, state, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_KERNEL_DRIVER | PSCI_MSTAR_STR_BOOT);
+		}
+		else {
+			//User mode Utopia
+			if (MDrv_MPM_Check_DC())
+#ifdef MAX_CNT_STR
+				err = invoke_psci_fn(fn, state, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_USER_DRIVER | PSCI_MSTAR_DISABLE_FBOOT);
+#else
+				err = invoke_psci_fn(fn, state, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_USER_DRIVER | PSCI_MSTAR_AC_BOOT);
+#endif
+			else
+				err = invoke_psci_fn(fn, state, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_USER_DRIVER | PSCI_MSTAR_STR_BOOT);
+		}
+	#endif
+	}
+	else {
+		err = invoke_psci_fn(fn, state, entry_point, 0);
+	}
+#else //CONFIG_MP_PLATFORM_ARM
 	err = invoke_psci_fn(fn, state, entry_point, 0);
+#endif
 	return psci_to_linux_errno(err);
 }
 
@@ -201,8 +278,16 @@ static int psci_0_2_cpu_suspend(u32 state, unsigned long entry_point)
 static int __psci_cpu_off(u32 fn, u32 state)
 {
 	int err;
-
+#ifdef CONFIG_MP_PLATFORM_ARM
+	if(TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE) {
+		err = invoke_psci_fn(fn, state, PSCI_MSTAR_WFE, 0);
+	}
+	else {
+		err = invoke_psci_fn(fn, state, 0, 0);
+	}
+#else //CONFIG_MP_PLATFORM_ARM
 	err = invoke_psci_fn(fn, state, 0, 0);
+#endif
 	return psci_to_linux_errno(err);
 }
 
@@ -219,8 +304,21 @@ static int psci_0_2_cpu_off(u32 state)
 static int __psci_cpu_on(u32 fn, unsigned long cpuid, unsigned long entry_point)
 {
 	int err;
+#ifdef CONFIG_MP_PLATFORM_ARM
+	if(TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE)
+	{
+#ifdef  CONFIG_ARM64
+		err = invoke_psci_fn(fn, cpuid, entry_point, PSCI_MSTAR_ARMv8_64BIT | PSCI_MSTAR_USER_DRIVER);
+#else
+		err = invoke_psci_fn(fn, cpuid, entry_point, PSCI_MSTAR_ARMv8_32BIT | PSCI_MSTAR_USER_DRIVER);
+#endif
 
+	}
+	else
+		err = invoke_psci_fn(fn, cpuid, entry_point, 0);
+#else //CONFIG_MP_PLATFORM_ARM
 	err = invoke_psci_fn(fn, cpuid, entry_point, 0);
+#endif
 	return psci_to_linux_errno(err);
 }
 
@@ -255,8 +353,17 @@ static int psci_0_2_migrate(unsigned long cpuid)
 static int psci_affinity_info(unsigned long target_affinity,
 		unsigned long lowest_affinity_level)
 {
+#ifdef CONFIG_MP_PLATFORM_ARM
+	if(isPMU_SUPPORT == PSCI_RET_SUCCESS)
+		return invoke_psci_fn(PSCI_FN_NATIVE(0_2, AFFINITY_INFO),
+			      target_affinity, lowest_affinity_level, PSCI_MSTAR_PMU_SUPPORT);
+	else
+		return invoke_psci_fn(PSCI_FN_NATIVE(0_2, AFFINITY_INFO),
+			      target_affinity, lowest_affinity_level, 0);
+#else
 	return invoke_psci_fn(PSCI_FN_NATIVE(0_2, AFFINITY_INFO),
 			      target_affinity, lowest_affinity_level, 0);
+#endif
 }
 
 static int psci_migrate_info_type(void)
@@ -342,7 +449,8 @@ static int __init psci_features(u32 psci_func_id)
 			      psci_func_id, 0, 0);
 }
 
-#ifdef CONFIG_CPU_IDLE
+#if defined(CONFIG_CPU_IDLE) || defined(CONFIG_MP_PLATFORM_ARM)
+static DEFINE_PER_CPU_READ_MOSTLY(u32 *, psci_power_state);
 static int psci_suspend_finisher(unsigned long state)
 {
 	u32 power_state = state;
@@ -351,10 +459,35 @@ static int psci_suspend_finisher(unsigned long state)
 	return psci_ops.cpu_suspend(power_state, pa_cpu_resume);
 }
 
+int mstar_psci_cpu_suspend_enter(unsigned long index)
+{
+	int ret;
+	u32 *state = __this_cpu_read(psci_power_state);
+	
+	if (WARN_ON_ONCE(!index))
+		return -EINVAL;
+	ret = psci_cpu_suspend_enter(*state);
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+extern void primary_resume_entry(void);
+#endif
 int psci_cpu_suspend_enter(u32 state)
 {
 	int ret;
-
+#ifdef CONFIG_MP_PLATFORM_ARM
+  	// [Note] 65536 is hardcode, it need to check state[] setting later.
+	if(TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) && defined(CONFIG_ARM64)
+		return psci_ops.cpu_suspend(65536, virt_to_phys(primary_resume_entry));
+#else
+		return psci_ops.cpu_suspend(65536, 0x20280000);
+#endif
+	}
+	else {
+		return psci_ops.cpu_suspend(65536, virt_to_phys(cpu_resume));
+	}
+#else
 	if (!psci_power_state_loses_context(state)) {
 		struct arm_cpuidle_irq_context context;
 
@@ -365,6 +498,7 @@ int psci_cpu_suspend_enter(u32 state)
 		ret = cpu_suspend(state, psci_suspend_finisher);
 	}
 
+#endif
 	return ret;
 }
 #endif
@@ -546,8 +680,7 @@ static int __init psci_0_2_init(struct device_node *np)
 
 	err = get_set_conduit_method(np);
 	if (err)
-		return err;
-
+		goto out_put_node;
 	/*
 	 * Starting with v0.2, the PSCI specification introduced a call
 	 * (PSCI_VERSION) that allows probing the firmware version, so
@@ -555,7 +688,15 @@ static int __init psci_0_2_init(struct device_node *np)
 	 * can be carried out according to the specific version reported
 	 * by firmware
 	 */
-	return psci_probe();
+	err = psci_probe();
+
+#ifdef CONFIG_MSTAR_CHIP
+	if (!err)
+		isPSCI = PSCI_RET_SUCCESS;
+#endif
+out_put_node:
+	of_node_put(np);
+	return err;
 }
 
 /*
@@ -594,7 +735,11 @@ static int __init psci_0_1_init(struct device_node *np)
 		psci_ops.migrate = psci_0_1_migrate;
 	}
 
-	return 0;
+#ifdef CONFIG_MSTAR_CHIP
+	if (!err)
+		isPSCI = PSCI_RET_SUCCESS;
+#endif
+	return err;
 }
 
 static int __init psci_1_0_init(struct device_node *np)

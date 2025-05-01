@@ -1,4 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0-only
+#defined by mstar
+config MSTAR_CHIP
+	bool
+	default y
+
+#defined by mstar for arm-boards
+config HAVE_SCHED_CLOCK
+	bool
 config ARM64
 	def_bool y
 	select ACPI_CCA_REQUIRED if ACPI
@@ -120,7 +128,7 @@ config ARM64
 	select FRAME_POINTER
 	select GENERIC_ALLOCATOR
 	select GENERIC_ARCH_TOPOLOGY
-	select GENERIC_CLOCKEVENTS_BROADCAST
+	select GENERIC_CLOCKEVENTS_BROADCAST if SMP && !MSTAR_CHIP
 	select GENERIC_CPU_AUTOPROBE
 	select GENERIC_CPU_VULNERABILITIES
 	select GENERIC_EARLY_IOREMAP
@@ -234,6 +242,16 @@ config ARM64
 	select ARCH_SUPPORTS_SPECULATIVE_PAGE_FAULT
 	help
 	  ARM 64-bit (AArch64) Linux support.
+
+config NEED_MACH_MEMORY_H
+    bool
+    help
+      Select this when mach/memory.h is required to provide special
+      definitions for this platform.  The need for mach/memory.h should
+      be avoided when possible.
+
+config SYS_SUPPORTS_APM_EMULATION
+	def_bool y
 
 config 64BIT
 	def_bool y
@@ -2127,6 +2145,14 @@ config CMDLINE_FORCE
 
 endchoice
 
+config MEMORY_START_ADDRESS
+	hex "Physical address of the memory starting"
+        default 0x40000000 if ((MSTAR_EDISON || MSTAR_EINSTEIN || MSTAR_NAPOLI || MSTAR_KAISER || MSTAR_EAGLE || MSTAR_KAISERS) && ANDROID)
+        default 0x40400000 if ((MSTAR_EDISON || MSTAR_EINSTEIN || MSTAR_NAPOLI || MSTAR_KAISER || MSTAR_EAGLE || MSTAR_KAISERS) && !ANDROID)
+        default 0x20000000 if ((MSTAR_EIFFEL || MSTAR_NIKE || MSTAR_MADISON || MSTAR_CLIPPERS || MSTAR_MIAMI) && ANDROID)
+        default 0x20200000 if ((MSTAR_EIFFEL || MSTAR_NIKE || MSTAR_MADISON || MSTAR_CLIPPERS || MSTAR_MIAMI || MSTAR_MUJI || MSTAR_MONET || MSTAR_MANHATTAN) && !ANDROID)
+        default 0x20200000ULL if ((MSTAR_MUJI || MSTAR_MONET || MSTAR_MANHATTAN) && !ANDROID)
+
 config EFI_STUB
 	bool
 
@@ -2166,6 +2192,9 @@ endmenu
 config SYSVIPC_COMPAT
 	def_bool y
 	depends on COMPAT && SYSVIPC
+
+source "arch/arm64/arm-boards/Kconfig"
+source "arch/arm64/arm-boards/plat-mstar/Kconfig"
 
 menu "Power management options"
 

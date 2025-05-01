@@ -25,7 +25,7 @@
 #include <asm/hwcap.h>
 #include <asm/sve_context.h>
 
-
+#include <mstar/mpatch_macro.h>
 /*
  * PSR bits
  */

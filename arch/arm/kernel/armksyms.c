@@ -49,6 +49,11 @@ extern void fpundefinstr(void);
 
 void mmioset(void *, unsigned int, size_t);
 void mmiocpy(void *, const void *, size_t);
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+extern long sys_mmap(unsigned long addr, unsigned long len,
+			 unsigned long prot, unsigned long flags,
+			 unsigned long fd, off_t off);
+#endif
 
 	/* platform dependent support */
 EXPORT_SYMBOL(arm_delay_ops);
@@ -163,6 +168,7 @@ EXPORT_SYMBOL(_find_next_bit_be);
 #endif
 
 #ifdef CONFIG_FUNCTION_TRACER
+
 EXPORT_SYMBOL(__gnu_mcount_nc);
 #endif
 
@@ -174,4 +180,8 @@ EXPORT_SYMBOL(__pv_offset);
 #ifdef CONFIG_HAVE_ARM_SMCCC
 EXPORT_SYMBOL(__arm_smccc_smc);
 EXPORT_SYMBOL(__arm_smccc_hvc);
+#endif
+
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+EXPORT_SYMBOL(sys_mmap);
 #endif

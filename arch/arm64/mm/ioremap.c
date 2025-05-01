@@ -224,6 +224,9 @@ out:
 	mutex_unlock(&ioremap_guard_lock);
 }
 
+#if (MP_PLATFORM_ARM_64bit_PORTING == 1)
+extern void flush_cache_all(void);
+#endif
 static void __iomem *__ioremap_caller(phys_addr_t phys_addr, size_t size,
 				      pgprot_t prot, void *caller)
 {
@@ -250,8 +253,10 @@ static void __iomem *__ioremap_caller(phys_addr_t phys_addr, size_t size,
 	/*
 	 * Don't allow RAM to be mapped.
 	 */
+#ifndef CONFIG_MP_PLATFORM_PIPE_FLUSH_DOUBLE_CHECK
 	if (WARN_ON(pfn_is_map_memory(__phys_to_pfn(phys_addr))))
 		return NULL;
+#endif
 
 	area = get_vm_area_caller(size, VM_IOREMAP, caller);
 	if (!area)
@@ -264,6 +269,14 @@ static void __iomem *__ioremap_caller(phys_addr_t phys_addr, size_t size,
 		vunmap((void *)addr);
 		return NULL;
 	}
+#if (MP_PLATFORM_ARM_64bit_PORTING == 1)
+	/*
+	 * Flush the caches and tlb to ensure that we're in a
+	 * consistent state.
+	 */
+	flush_cache_all();
+	flush_tlb_all();
+#endif
 
 	return (void __iomem *)(offset + addr);
 }

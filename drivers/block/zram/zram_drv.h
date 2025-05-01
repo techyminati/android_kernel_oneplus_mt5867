@@ -20,6 +20,7 @@
 #include <linux/crypto.h>
 
 #include "zcomp.h"
+#include "mdrv_mzc_drv.h"
 
 #define SECTORS_PER_PAGE_SHIFT	(PAGE_SHIFT - SECTOR_SHIFT)
 #define SECTORS_PER_PAGE	(1 << SECTORS_PER_PAGE_SHIFT)
@@ -50,6 +51,9 @@ enum zram_pageflags {
 	ZRAM_UNDER_WB,	/* page is under writeback */
 	ZRAM_HUGE,	/* Incompressible page */
 	ZRAM_IDLE,	/* not accessed page since last idle marking */
+#ifdef CONFIG_MP_MZCCMDQ_HYBRID_HW
+	ZRAM_IS_MZC,
+#endif
 
 	__NR_ZRAM_PAGEFLAGS,
 };

@@ -23,7 +23,9 @@
 #endif
 
 #include "xfrm_inout.h"
-
+#if  defined(CONFIG_NOE_NAT_HW)
+#include "../../drivers/mstar2/drv/noe/nat/hw_nat/mdrv_hwnat.h"
+#endif
 static int xfrm_output2(struct net *net, struct sock *sk, struct sk_buff *skb);
 static int xfrm_inner_extract_output(struct xfrm_state *x, struct sk_buff *skb);
 
@@ -534,6 +536,21 @@ static int xfrm_output_one(struct sk_buff *skb, int err)
 		x->curlft.packets++;
 
 		spin_unlock_bh(&x->lock);
+
+#if  defined(CONFIG_NOE_NAT_HW)
+        if ((FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_PCI) ||
+           (FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_WLAN) ||
+            (FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_GE)){
+			if(IS_SPACE_AVAILABLED_HEAD(skb))
+            	FOE_MAGIC_TAG_HEAD(skb) = 0;
+        }
+        if ((FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_PCI) ||
+           (FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_WLAN) ||
+           (FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_GE)){
+			if(IS_SPACE_AVAILABLED_TAIL(skb))
+            	FOE_MAGIC_TAG_TAIL(skb) = 0;
+        }
+#endif
 
 		skb_dst_force(skb);
 		if (!skb_dst(skb)) {

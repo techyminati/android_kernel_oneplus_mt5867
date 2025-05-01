@@ -18,6 +18,10 @@
 
 struct page;
 struct vm_area_struct;
+extern u64 linux_memory_address,linux_memory_length;
+extern u64 linux_memory2_address,linux_memory2_length;
+extern u64 linux_memory3_address,linux_memory3_length;
+extern volatile unsigned int lx_num;
 
 extern void copy_page(void *to, const void *from);
 extern void clear_page(void *to);

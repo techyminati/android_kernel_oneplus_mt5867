@@ -173,6 +173,7 @@ void __init kasan_early_init(void)
 	}
 
 	BUILD_BUG_ON((KASAN_SHADOW_END - (1UL << 29)) != KASAN_SHADOW_OFFSET);
+	 flush_cache_all();
 	/*
 	 * We walk the page table and set all of the shadow memory to point
 	 * to the scratch page.

@@ -86,9 +86,30 @@ if [ $(words $(UIMAGE_LOADADDR)) -ne 1 ]; then \
 	false; \
 fi
 
+ifneq ($(CONFIG_MSTAR_UIMAGE_UC),y)
 $(obj)/uImage:	$(obj)/zImage FORCE
+else
+$(obj)/uImage:	$(obj)/Image FORCE
+endif
 	@$(check_for_multiple_loadaddr)
 	$(call if_changed,uimage)
+
+ifeq ($(CONFIG_MSTAR_CHIP),y)
+MAIN_DTB_OBJS := $(subst ",,$(CONFIG_MSTAR_CHIP_NAME)_an).main_dtb
+MAIN_DTB := $(addprefix $(obj)/dts/,$(MAIN_DTB_OBJS))
+
+ifeq ($(CONFIG_MSTAR_CHIP),y)
+# cat
+# ---------------------------------------------------------------------------
+# Concatentate multiple files together
+quiet_cmd_catbin = CAT     $@
+cmd_catbin = (cat $(filter-out FORCE,$^) > $@) || (rm -f $@; false)
+endif
+
+$(obj)/uImage-dtb: $(obj)/uImage $(MAIN_DTB) FORCE
+	$(call if_changed,catbin)
+	@echo ' uImage $@ is ready'
+endif
 
 $(obj)/bootp/bootp: $(obj)/zImage initrd FORCE
 	$(Q)$(MAKE) $(build)=$(obj)/bootp $@

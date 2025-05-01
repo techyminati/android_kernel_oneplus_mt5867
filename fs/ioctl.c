@@ -323,8 +323,11 @@ static int compat_ioctl_preallocate(struct file *file, int mode,
 	return vfs_fallocate(file, mode | FALLOC_FL_KEEP_SIZE, sr.l_start, sr.l_len);
 }
 #endif
-
+#ifdef CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL
+int file_ioctl(struct file *filp, unsigned int cmd, int __user *p)
+#else
 static int file_ioctl(struct file *filp, unsigned int cmd, int __user *p)
+#endif
 {
 	switch (cmd) {
 	case FIBMAP:
@@ -339,8 +342,15 @@ static int file_ioctl(struct file *filp, unsigned int cmd, int __user *p)
 		return ioctl_preallocate(filp, FALLOC_FL_ZERO_RANGE, p);
 	}
 
+#if defined(__aarch64__)
 	return -ENOIOCTLCMD;
+#else
+	return vfs_ioctl(filp, cmd, p);
+#endif
 }
+#ifdef CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL
+EXPORT_SYMBOL(file_ioctl);
+#endif
 
 static int ioctl_fionbio(struct file *filp, int __user *argp)
 {
@@ -877,7 +887,9 @@ out:
 	fdput(f);
 	return error;
 }
-
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+//EXPORT_SYMBOL(ksys_ioctl);
+#endif
 #ifdef CONFIG_COMPAT
 /**
  * compat_ptr_ioctl - generic implementation of .compat_ioctl file operation

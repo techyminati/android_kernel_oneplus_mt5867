@@ -1223,6 +1223,9 @@ struct task_struct {
 	int				cpuset_mem_spread_rotor;
 	int				cpuset_slab_spread_rotor;
 #endif
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+    int memalloc_idx;
+#endif
 #ifdef CONFIG_CGROUPS
 	/* Control Group info protected by css_set_lock: */
 	struct css_set __rcu		*cgroups;
@@ -1731,6 +1734,13 @@ extern struct pid *cad_pid;
 #define PF_MEMALLOC_PIN		0x10000000	/* Allocation context constrained to zones which allow long term pinning. */
 #define PF_FREEZER_SKIP		0x40000000	/* Freezer should not count it as freezable */
 #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
+#ifdef CONFIG_MP_MSTAR_STR_PROCESS_FREEZE_LATE
+#define PF_FREEZE_LATE		0x100000000	/* Threads to be frozen along with kernel threads */
+#endif
+#ifdef CONFIG_MP_RESERVED_VMA_PATCH_FOR_DFB
+#define PF_MAPPED_DFB		0x200000000    /* I have mapped DFB to my vma*/
+#endif
+
 
 /*
  * Only the _current_ task can read/write to tsk->flags, but other
@@ -1873,6 +1883,15 @@ static inline void release_user_cpus_ptr(struct task_struct *p)
 
 static inline int dl_task_check_affinity(struct task_struct *p, const struct cpumask *mask)
 {
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_MP_ASYM_UMA_ALLOCATION
+static inline int set_memalloc_idx(struct task_struct *p,
+						int val)
+{
+	p->memalloc_idx = val;
 	return 0;
 }
 #endif

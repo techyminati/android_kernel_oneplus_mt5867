@@ -41,6 +41,9 @@
  *  r5, r6 corrupted
  */
 __vet_atags:
+#ifdef CONFIG_OF
+	mov	r2, #0x23000000			@ tempary patch assume FDT is at 0x23000000
+#endif
 	tst	r2, #0x3			@ aligned?
 	bne	1f
 
@@ -101,6 +104,19 @@ __mmap_switched:
    ARM(	ldmia	r4!, {r0, r1, sp} )
  THUMB(	ldmia	r4!, {r0, r1, r3} )
  THUMB(	mov	sp, r3 )
+#ifdef CONFIG_MP_IRQ_STACK
+	push	{r4, r5}
+	mrc	p15, 0, r4, c0, c0, 5
+#ifdef CONFIG_MP_IRQ_STACK_WITH_FCM
+	lsr	r4, r4, #8
+#endif
+	and	r4, r4, #0xff
+	ldr	r5, =sp_mtk
+	add	r5, r5, r4, lsl #2
+	mov	r4, sp
+	str	r4, [r5]
+	pop	{r4, r5}
+#endif
 	sub	r2, r1, r0
 	mov	r1, #0
 	bl	__memset			@ clear .bss

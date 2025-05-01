@@ -389,6 +389,10 @@ config SYSVIPC
 	  section 6.4 of the Linux Programmer's Guide, available from
 	  <http://www.tldp.org/guides.html>.
 
+config DATA_SEPARATION
+	bool "data separation"
+	default n
+
 config SYSVIPC_SYSCTL
 	bool
 	depends on SYSVIPC

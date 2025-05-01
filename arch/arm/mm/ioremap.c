@@ -285,9 +285,11 @@ static void __iomem * __arm_ioremap_pfn_caller(unsigned long pfn,
 	 * Don't allow RAM to be mapped with mismatched attributes - this
 	 * causes problems with ARMv6+
 	 */
+//#ifndef CONFIG_MP_PLATFORM_PIPE_FLUSH_DOUBLE_CHECK
 	if (WARN_ON(memblock_is_map_memory(PFN_PHYS(pfn)) &&
 		    mtype != MT_MEMORY_RW))
 		return NULL;
+//#endif
 
 	area = get_vm_area_caller(size, VM_IOREMAP, caller);
  	if (!area)

@@ -45,6 +45,10 @@
 
 #include "usb.h"
 
+#ifndef MP_USB_MSTAR
+#include <mstar/mpatch_macro.h>
+#endif
+
 #ifdef CONFIG_PM
 #define MAYBE_CAP_SUSPEND	USBDEVFS_CAP_SUSPEND
 #else
@@ -1208,6 +1212,10 @@ static int do_proc_control(struct usb_dev_state *ps,
 		usb_unlock_device(dev);
 		i = usbfs_start_wait_urb(urb, tmo, &actlen);
 
+#if (MP_USB_MSTAR==1)
+		if (dev->state != USB_STATE_CONFIGURED)
+			msleep(1);
+#endif
 		/* Linger a bit, prior to the next control message. */
 		if (dev->quirks & USB_QUIRK_DELAY_CTRL_MSG)
 			msleep(200);

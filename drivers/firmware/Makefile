@@ -2,6 +2,9 @@
 #
 # Makefile for the linux kernel.
 #
+ifeq ($(CONFIG_MP_PLATFORM_ARM),y)
+EXTRA_CFLAGS += -I$(srctree)/drivers/mstar2/include
+endif
 obj-$(CONFIG_ARM_SCPI_PROTOCOL)	+= arm_scpi.o
 obj-$(CONFIG_ARM_SCPI_POWER_DOMAIN) += scpi_pm_domain.o
 obj-$(CONFIG_ARM_SDE_INTERFACE)	+= arm_sdei.o

@@ -1070,7 +1070,10 @@ static ssize_t oom_adj_read(struct file *file, char __user *buf, size_t count,
 	len = snprintf(buffer, sizeof(buffer), "%d\n", oom_adj);
 	return simple_read_from_buffer(buf, count, ppos, buffer, len);
 }
-
+#if defined(CONFIG_MP_FindTaskStatus)
+extern int Get_Target_pid(void);
+extern int Set_Target_pid_OOM_adj(int oom_adj);
+#endif
 static int __set_oom_adj(struct file *file, int oom_adj, bool legacy)
 {
 	struct mm_struct *mm = NULL;
@@ -1121,6 +1124,13 @@ static int __set_oom_adj(struct file *file, int oom_adj, bool legacy)
 	}
 
 	task->signal->oom_score_adj = oom_adj;
+#if defined(CONFIG_MP_FindTaskStatus)
+	  if(Get_Target_pid()==task_pid_nr(task))
+	  {
+		  printk("\033[0;41;37m __set_oom_adj:%s %d %d %d \033[m\n",task->comm,task->pid,oom_adj,task->tgid);
+		  Set_Target_pid_OOM_adj(oom_adj);
+	  }
+#endif
 	if (!legacy && has_capability_noaudit(current, CAP_SYS_RESOURCE))
 		task->signal->oom_score_adj_min = (short)oom_adj;
 	trace_oom_score_adj_update(task);
@@ -3215,7 +3225,11 @@ static int proc_stack_depth(struct seq_file *m, struct pid_namespace *ns,
 static const struct file_operations proc_task_operations;
 static const struct inode_operations proc_task_inode_operations;
 
+#ifdef CONFIG_MP_Android_MSTAR_PER_AN_VERSION_MODIFICATION
+static struct pid_entry tgid_base_stuff[] = {
+#else
 static const struct pid_entry tgid_base_stuff[] = {
+#endif
 	DIR("task",       S_IRUGO|S_IXUGO, proc_task_inode_operations, proc_task_operations),
 	DIR("fd",         S_IRUSR|S_IXUSR, proc_fd_inode_operations, proc_fd_operations),
 	DIR("map_files",  S_IRUSR|S_IXUSR, proc_map_files_inode_operations, proc_map_files_operations),
@@ -3329,6 +3343,25 @@ static const struct pid_entry tgid_base_stuff[] = {
 	ONE("seccomp_cache", S_IRUSR, proc_pid_seccomp_cache),
 #endif
 };
+
+
+#ifdef CONFIG_MP_Android_MSTAR_PER_AN_VERSION_MODIFICATION
+void tgid_base_stuff_modification(char *changed_name, umode_t wanted_mode)
+{
+	int i = 0;
+	int j = ARRAY_SIZE(tgid_base_stuff);
+
+	printk("\033[35mFunction = %s, Line = %d, changed_name is %s\033[m\n", __PRETTY_FUNCTION__, __LINE__, changed_name);
+	for(i = 0; i < j; i++)
+	{
+		if( strcmp(changed_name, tgid_base_stuff[i].name) == 0 )
+		{
+			printk("\033[35mget the changed item, going to change its mode\033[m\n");
+			tgid_base_stuff[i].mode = wanted_mode;
+		}
+	}
+}
+#endif
 
 static int proc_tgid_base_readdir(struct file *file, struct dir_context *ctx)
 {

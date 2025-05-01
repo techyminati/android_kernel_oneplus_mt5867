@@ -54,6 +54,9 @@
 #include <net/ip.h>
 
 #include "nf_internals.h"
+#if  defined(CONFIG_NOE_NAT_HW)
+#include "../../drivers/mstar2/drv/noe/nat/hw_nat/mdrv_hwnat.h"
+#endif
 
 __cacheline_aligned_in_smp spinlock_t nf_conntrack_locks[CONNTRACK_LOCKS];
 EXPORT_SYMBOL_GPL(nf_conntrack_locks);
@@ -1928,6 +1931,9 @@ nf_conntrack_in(struct sk_buff *skb, const struct nf_hook_state *state)
 {
 	enum ip_conntrack_info ctinfo;
 	struct nf_conn *ct, *tmpl;
+#if defined(CONFIG_NOE_NAT_HW)
+	struct nf_conn_help *help;
+#endif
 	u_int8_t protonum;
 	int dataoff, ret;
 
@@ -2000,6 +2006,23 @@ repeat:
 		goto out;
 	}
 
+#if  defined(CONFIG_NOE_NAT_HW)
+        help = nfct_help(ct);
+        if (help && help->helper) {
+                if((FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_PCI) ||
+                   (FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_WLAN) ||
+                   (FOE_MAGIC_TAG_HEAD(skb) == FOE_MAGIC_GE)){
+                   if(IS_SPACE_AVAILABLED_HEAD(skb))
+                        FOE_MAGIC_TAG_HEAD(skb) = 0;
+                }
+                if((FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_PCI) ||
+                   (FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_WLAN) ||
+                   (FOE_MAGIC_TAG_TAIL(skb) == FOE_MAGIC_GE)){
+                   if(IS_SPACE_AVAILABLED_TAIL(skb))
+                        FOE_MAGIC_TAG_TAIL(skb) = 0;
+                }
+        }
+#endif
 	if (ctinfo == IP_CT_ESTABLISHED_REPLY &&
 	    !test_and_set_bit(IPS_SEEN_REPLY_BIT, &ct->status))
 		nf_conntrack_event_cache(IPCT_REPLY, ct);

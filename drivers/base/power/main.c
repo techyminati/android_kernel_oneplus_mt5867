@@ -40,6 +40,15 @@
 #include "../base.h"
 #include "power.h"
 
+#ifdef CONFIG_MSTAR_CHIP
+#define pm_callback_timestamp(dev, info, _p)				\
+({									\
+	char tmp[64];							\
+	snprintf(tmp, sizeof(tmp), "%s %s %s", dev_name(dev), info, _p);\
+	add_timestamp(tmp);						\
+})
+#endif
+
 typedef int (*pm_callback_t)(struct device *);
 
 #define list_for_each_entry_rcu_locked(pos, head, member) \
@@ -485,7 +494,13 @@ static int dpm_run_callback(pm_callback_t cb, struct device *dev,
 
 	pm_dev_dbg(dev, state, info);
 	trace_device_pm_callback_start(dev, info, state.event);
+#ifdef CONFIG_MSTAR_CHIP
+	pm_callback_timestamp(dev, info, "begin");
+#endif
 	error = cb(dev);
+#ifdef CONFIG_MSTAR_CHIP
+	pm_callback_timestamp(dev, info, "end");
+#endif
 	trace_device_pm_callback_end(dev, error);
 	suspend_report_result(cb, error);
 
@@ -697,6 +712,9 @@ static void dpm_noirq_resume_devices(pm_message_t state)
 	ktime_t starttime = ktime_get();
 
 	trace_suspend_resume(TPS("dpm_resume_noirq"), state.event, true);
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("dpm_resume_noirq begin");
+#endif
 	mutex_lock(&dpm_list_mtx);
 	pm_transition = state;
 
@@ -734,7 +752,17 @@ static void dpm_noirq_resume_devices(pm_message_t state)
 	mutex_unlock(&dpm_list_mtx);
 	async_synchronize_full();
 	dpm_show_time(starttime, state, 0, "noirq");
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("dpm_resume_noirq end");
+#endif
 	trace_suspend_resume(TPS("dpm_resume_noirq"), state.event, false);
+}
+
+void dpm_noirq_end(void)
+{
+	resume_device_irqs();
+	device_wakeup_disarm_wake_irqs();
+	cpuidle_resume();
 }
 
 /**
@@ -840,6 +868,9 @@ void dpm_resume_early(pm_message_t state)
 	ktime_t starttime = ktime_get();
 
 	trace_suspend_resume(TPS("dpm_resume_early"), state.event, true);
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("dpm_resume_early begin");
+#endif
 	mutex_lock(&dpm_list_mtx);
 	pm_transition = state;
 
@@ -877,6 +908,9 @@ void dpm_resume_early(pm_message_t state)
 	mutex_unlock(&dpm_list_mtx);
 	async_synchronize_full();
 	dpm_show_time(starttime, state, 0, "early");
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("dpm_resume_early end");
+#endif
 	trace_suspend_resume(TPS("dpm_resume_early"), state.event, false);
 }
 
@@ -1006,6 +1040,9 @@ void dpm_resume(pm_message_t state)
 	ktime_t starttime = ktime_get();
 
 	trace_suspend_resume(TPS("dpm_resume"), state.event, true);
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("dpm_resume begin");
+#endif
 	might_sleep();
 
 	mutex_lock(&dpm_list_mtx);
@@ -1047,7 +1084,9 @@ void dpm_resume(pm_message_t state)
 	dpm_show_time(starttime, state, 0, NULL);
 
 	cpufreq_resume();
-	devfreq_resume();
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("dpm_resume end");
+#endif
 	trace_suspend_resume(TPS("dpm_resume"), state.event, false);
 }
 
@@ -1087,7 +1126,13 @@ static void device_complete(struct device *dev, pm_message_t state)
 
 	if (callback) {
 		pm_dev_dbg(dev, state, info);
+#ifdef CONFIG_MSTAR_CHIP
+		pm_callback_timestamp(dev, info, "begin");
+#endif
 		callback(dev);
+#ifdef CONFIG_MSTAR_CHIP
+		pm_callback_timestamp(dev, info, "end");
+#endif
 	}
 
 	device_unlock(dev);
@@ -1108,6 +1153,9 @@ void dpm_complete(pm_message_t state)
 	struct list_head list;
 
 	trace_suspend_resume(TPS("dpm_complete"), state.event, true);
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("dpm_complete begin");
+#endif
 	might_sleep();
 
 	INIT_LIST_HEAD(&list);
@@ -1134,6 +1182,9 @@ void dpm_complete(pm_message_t state)
 
 	/* Allow device probing and trigger re-probing of deferred devices */
 	device_unblock_probing();
+#ifdef CONFIG_MSTAR_CHIP
+	add_timestamp("dpm_complete end");
+#endif
 	trace_suspend_resume(TPS("dpm_complete"), state.event, false);
 }
 
@@ -1295,7 +1346,14 @@ static int device_suspend_noirq(struct device *dev)
 	return __device_suspend_noirq(dev, pm_transition, false);
 }
 
-static int dpm_noirq_suspend_devices(pm_message_t state)
+void dpm_noirq_begin(void)
+{
+	cpuidle_pause();
+	device_wakeup_arm_wake_irqs();
+	suspend_device_irqs();
+}
+
+int dpm_noirq_suspend_devices(pm_message_t state)
 {
 	ktime_t starttime = ktime_get();
 	int error = 0;
@@ -1328,6 +1386,9 @@ static int dpm_noirq_suspend_devices(pm_message_t state)
 
 		mutex_lock(&dpm_list_mtx);
 
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+        if(!is_mstar_str())
+#endif
 		if (error || async_error)
 			break;
 	}
@@ -1517,7 +1578,9 @@ int dpm_suspend_late(pm_message_t state)
 		put_device(dev);
 
 		mutex_lock(&dpm_list_mtx);
-
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+        if(!is_mstar_str())
+#endif
 		if (error || async_error)
 			break;
 	}
@@ -1642,6 +1705,9 @@ static int __device_suspend(struct device *dev, pm_message_t state, bool async)
 	 */
 	pm_runtime_barrier(dev);
 
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+    if(!is_mstar_str())
+#endif
 	if (pm_wakeup_pending()) {
 		dev->power.direct_complete = false;
 		async_error = -EBUSY;
@@ -2015,6 +2081,36 @@ void dpm_for_each_dev(void *data, void (*fn)(struct device *, void *))
 	device_pm_unlock();
 }
 EXPORT_SYMBOL_GPL(dpm_for_each_dev);
+
+void dpm_move_before(struct device *deva, struct device *devb)
+{
+	if(!deva || !devb)
+		return;
+
+	device_pm_move_before(deva, devb);
+}
+EXPORT_SYMBOL_GPL(dpm_move_before);
+
+struct device* dpm_get_dev(const char* name)
+{
+	struct device *tmp_dev;
+
+	if(!name)
+		return NULL;
+
+	device_pm_lock();
+	list_for_each_entry(tmp_dev, &dpm_list, power.entry)
+		if(!strcmp(dev_name(tmp_dev), name)) {
+			pr_debug("Get dpm dev: %s\n", name);
+			device_pm_unlock();
+			return tmp_dev;
+		}
+
+	device_pm_unlock();
+	return NULL;
+
+}
+EXPORT_SYMBOL_GPL(dpm_get_dev);
 
 static bool pm_ops_is_empty(const struct dev_pm_ops *ops)
 {

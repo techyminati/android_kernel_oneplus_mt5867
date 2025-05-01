@@ -43,8 +43,23 @@ unsigned int sysctl_sched_latency			= 6000000ULL;
 EXPORT_SYMBOL_GPL(sysctl_sched_latency);
 static unsigned int normalized_sysctl_sched_latency	= 6000000ULL;
 
+#if defined(CONFIG_MP_AUDIO_DECODE_PERFORMANCE)
+#include <linux/irq.h>
+unsigned int sysctl_enable_audio_decoding = 0;
+unsigned int sysctl_enable_audio_decode_scheduler = 1;
+char sysctl_audio_process_name[TASK_COMM_LEN];
+unsigned int set_audio_mask = 0;
+unsigned int set_spi_id = 0;
 /*
- * The initial- and re-scaling of tunables is configurable
+* The spi_id is the spi interrupts which may run on the cpu mask of audio process.
+* According to different platform, spi_id must be reset.
+*/
+#define SPI_ID_NUM 1
+#define IRQ_ID_ETH0 41
+unsigned int spi_id[SPI_ID_NUM]={IRQ_ID_ETH0};
+const struct cpumask *spi_mask;
+#endif
+/* The initial- and re-scaling of tunables is configurable
  *
  * Options are:
  *
@@ -7273,6 +7288,42 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 	 * required for stable ->cpus_allowed
 	 */
 	lockdep_assert_held(&p->pi_lock);
+#if defined(CONFIG_MP_AUDIO_DECODE_PERFORMANCE)
+	if (sysctl_enable_audio_decoding && set_audio_mask && sysctl_enable_audio_decode_scheduler)  {
+		if(!set_spi_id) {
+			int loop;
+			cpumask_var_t new_mask;
+			if(!alloc_cpumask_var(&new_mask, GFP_KERNEL))
+				return -ENOMEM;
+			for (loop=SPI_ID_NUM; loop>0 ; loop--) {
+				struct irq_desc *spi_desc = irq_to_desc(spi_id[loop-1]);
+				if(spi_desc) {
+					spi_mask = spi_desc->irq_common_data.affinity;
+					cpumask_copy(new_mask, spi_mask);
+					cpumask_clear_cpu(num_online_cpus()-1, new_mask);
+					irq_set_affinity(spi_id[loop-1], (const struct cpumask*)&new_mask);
+				}
+			}
+			free_cpumask_var(new_mask);
+			set_spi_id = 1;
+		}
+	} else {
+		// Reset the affinity for the spi_id when audio decoding disabled.
+		if (set_spi_id) {
+			int loop;
+			cpumask_var_t new_mask;
+			if(!alloc_cpumask_var(&new_mask, GFP_KERNEL))
+				return -ENOMEM;
+			for (loop=SPI_ID_NUM; loop>0 ; loop--) {
+				cpumask_copy(new_mask, &p->cpus_mask);
+				cpumask_set_cpu(num_online_cpus()-1, new_mask);
+				irq_set_affinity(spi_id[loop-1], (const struct cpumask*)&new_mask);
+			}
+			free_cpumask_var(new_mask);
+			set_spi_id = 0;
+		}
+	}
+#endif
 	if (wake_flags & WF_TTWU) {
 		record_wakee(p);
 

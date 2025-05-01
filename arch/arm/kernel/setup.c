@@ -62,7 +62,17 @@
 #include <asm/kasan.h>
 
 #include "atags.h"
+#ifdef CONFIG_MSTAR_CHIP
+#include <mstar/mpatch_macro.h>
+#include "mdrv_types.h"
 
+#include <linux/version.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
+#ifdef CONFIG_MP_MMA_ENABLE
+#include <linux/dma-contiguous.h>
+#endif
+#endif
+#endif
 
 #if defined(CONFIG_FPE_NWFPE) || defined(CONFIG_FPE_FASTFPE)
 char fpe_type[8];
@@ -80,6 +90,8 @@ extern void init_default_cache_policy(unsigned long);
 extern void paging_init(const struct machine_desc *desc);
 extern void early_mm_init(const struct machine_desc *);
 extern void adjust_lowmem_bounds(void);
+extern void sanity_check_meminfo(void);
+extern void reboot_setup(char *str);
 extern enum reboot_mode reboot_mode;
 extern void setup_dma_zone(const struct machine_desc *desc);
 
@@ -285,6 +297,21 @@ static int cpu_has_aliasing_icache(unsigned int arch)
 {
 	int aliasing_icache;
 	unsigned int id_reg, num_sets, line_size;
+
+#ifdef CONFIG_MSTAR_CHIP
+#ifdef CONFIG_BIG_LITTLE
+	/*
+	 * We expect a combination of Cortex-A15 and Cortex-A7 cores.
+	 * A7 = VIPT aliasing I-cache
+	 * A15 = PIPT (non-aliasing) I-cache
+	 * To cater for this discrepancy, let's assume aliasing I-cache
+	 * all the time.  This means unneeded extra work on the A15 but
+	 * only ptrace is affected which is not performance critical.
+	 */
+	if ((read_cpuid_id() & 0xff0ffff0) == 0x410fc0f0)
+		return 1;
+#endif
+#endif
 
 	/* PIPT caches never alias. */
 	if (icache_is_pipt())
@@ -526,6 +553,7 @@ void notrace cpu_init(void)
 #ifndef CONFIG_CPU_V7M
 	unsigned int cpu = smp_processor_id();
 	struct stack *stk = &stacks[cpu];
+	unsigned long off;
 
 	if (cpu >= NR_CPUS) {
 		pr_crit("CPU%u: bad primary CPU number\n", cpu);
@@ -537,6 +565,7 @@ void notrace cpu_init(void)
 	 * boot cpu, smp_prepare_boot_cpu is called after percpu area setup.
 	 */
 	set_my_cpu_offset(per_cpu_offset(cpu));
+	off = __my_cpu_offset;
 
 	cpu_proc_init();
 
@@ -591,10 +620,33 @@ void __init smp_setup_processor_id(void)
 	int i;
 	u32 mpidr = is_smp() ? read_cpuid_mpidr() & MPIDR_HWID_BITMASK : 0;
 	u32 cpu = MPIDR_AFFINITY_LEVEL(mpidr, 0);
+	unsigned long off;
 
 	cpu_logical_map(0) = cpu;
+#if (defined CONFIG_MP_PLATFORM_ARM_32bit_PORTING) && (defined CONFIG_MP_MULTI_CLUSTER_32BIT_CPUID)
+	/* we use fixed setting for cpu_id */
+	for (i = 1; i < nr_cpu_ids; ++i)
+	{
+		switch(i){
+		case 0:
+			continue;
+		case 1:
+			cpu_logical_map(i) = 0x001;
+			break;
+		case 2:
+			cpu_logical_map(i) = 0x100;
+			break;
+		case 3:
+			cpu_logical_map(i) = 0x101;
+			break;
+		default:
+			BUG_ON(1);
+		}
+	}
+#else
 	for (i = 1; i < nr_cpu_ids; ++i)
 		cpu_logical_map(i) = i == cpu ? 0 : i;
+#endif
 
 	/*
 	 * clear __my_cpu_offset on boot CPU to avoid hang caused by
@@ -602,6 +654,8 @@ void __init smp_setup_processor_id(void)
 	 * access percpu variable inside lock_release
 	 */
 	set_my_cpu_offset(0);
+	off = __my_cpu_offset;
+	pr_info("***2 off=0x%lx!!!\n", off);
 
 	pr_info("Booting Linux on physical CPU 0x%x\n", mpidr);
 }
@@ -784,6 +838,11 @@ int __init arm_add_memory(u64 start, u64 size)
 #endif
 
 	if (aligned_start < PHYS_OFFSET) {
+#ifdef CONFIG_MSTAR_CHIP
+		pr_info("Ignoring aligned_start below PHYS_OFFSET: 0x%08llx-0x%08lx\n",
+					aligned_start, PHYS_OFFSET);
+		return -EINVAL;
+#endif
 		if (aligned_start + size <= PHYS_OFFSET) {
 			pr_info("Ignoring memory below PHYS_OFFSET: 0x%08llx-0x%08llx\n",
 				aligned_start, aligned_start + size);
@@ -944,6 +1003,13 @@ static int __init customize_machine(void)
 	if (machine_desc->init_machine)
 		machine_desc->init_machine();
 
+#ifdef CONFIG_MSTAR_CHIP
+#ifdef CONFIG_OF
+else
+	of_platform_populate(NULL, of_default_bus_match_table,
+                                        NULL, NULL);
+#endif
+#endif
 	return 0;
 }
 arch_initcall(customize_machine);
@@ -1077,6 +1143,63 @@ void __init hyp_mode_check(void)
 #endif
 }
 
+#if defined(CONFIG_MSTAR_CHIP) && defined(CONFIG_OF)
+int keep_fdt(char *param, char *boot_fdt)
+{
+        char* boot_param;
+        char* temp_boot_param;
+        int param_len = 0;
+        boot_param = strstr(boot_command_line ,param);
+        if(boot_param != NULL)
+        {
+             temp_boot_param = boot_param;
+             while(*temp_boot_param != ' ' && *temp_boot_param != '\0')
+             {
+                   param_len++;
+                   temp_boot_param++;
+             }
+             param_len++;
+             if(param_len < COMMAND_LINE_SIZE)
+             {
+                  strlcpy(boot_fdt, boot_param, param_len);
+                  return 1;
+             }
+             else
+             {
+                   pr_err("ERR : boot command line is too long !\n");
+                   return 0;
+             }
+        }
+        return 0;
+}
+
+
+int cat_fdt(char *param, char *boot_fdt, int keep)
+{
+        if(strstr(boot_command_line ,param) == NULL && keep)
+        {
+                if(strlen(boot_command_line)+strlen(boot_fdt)+1 < COMMAND_LINE_SIZE)
+                {
+                        strcat(boot_command_line ," ");
+                        strncat(boot_command_line ,boot_fdt, strlen(boot_fdt));
+                        return 1;
+                }
+                else
+                {
+                      pr_err("ERR : boot command line is too long !\n");
+                      return 0;
+                }
+        }
+        return 0;
+}
+#endif
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+extern void __init prom_meminit(void);
+volatile unsigned int lx_num = 0;
+#endif
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wframe-larger-than="
+
 static void (*__arm_pm_restart)(enum reboot_mode reboot_mode, const char *cmd);
 
 static int arm_restart(struct notifier_block *nb, unsigned long action,
@@ -1094,6 +1217,12 @@ static struct notifier_block arm_restart_nb = {
 void __init setup_arch(char **cmdline_p)
 {
 	const struct machine_desc *mdesc = NULL;
+#if defined(CONFIG_MSTAR_CHIP) && defined(CONFIG_OF)
+	//char an_version_fdt[COMMAND_LINE_SIZE];
+	int is_an_version_keep;
+	//char vmalloc_fdt[COMMAND_LINE_SIZE];
+	int is_vmalloc_keep;
+#endif
 	void *atags_vaddr = NULL;
 
 	if (__atags_pointer)
@@ -1108,6 +1237,17 @@ void __init setup_arch(char **cmdline_p)
 	}
 	if (!mdesc)
 		mdesc = setup_machine_tags(atags_vaddr, __machine_arch_type);
+/*		
+#if defined(CONFIG_MSTAR_CHIP) && defined(CONFIG_OF)
+	else {
+		is_vmalloc_keep = keep_fdt("vmalloc", vmalloc_fdt);
+		is_an_version_keep = keep_fdt("AN_VERSION", an_version_fdt);
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB
+		setup_machine_tags(0, __machine_arch_type);
+#endif
+		cat_fdt("AN_VERSION", an_version_fdt, is_an_version_keep);
+		cat_fdt("vmalloc", vmalloc_fdt, is_vmalloc_keep);
+		
 	if (!mdesc) {
 		early_print("\nError: invalid dtb and unrecognized/unsupported machine ID\n");
 		early_print("  r1=0x%08x, r2=0x%08x\n", __machine_arch_type,
@@ -1115,7 +1255,9 @@ void __init setup_arch(char **cmdline_p)
 		if (__atags_pointer)
 			early_print("  r2[]=%*ph\n", 16, atags_vaddr);
 		dump_machine_table();
+	    }
 	}
+#endif*/
 
 	machine_desc = mdesc;
 	machine_name = mdesc->name;
@@ -1123,6 +1265,10 @@ void __init setup_arch(char **cmdline_p)
 
 	if (mdesc->reboot_mode != REBOOT_HARD)
 		reboot_mode = mdesc->reboot_mode;
+#ifndef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+	if (mdesc->reboot_mode)
+		reboot_setup((char *)&mdesc->reboot_mode);
+#endif
 
 	setup_initial_init_mm(_text, _etext, _edata, _end);
 
@@ -1141,6 +1287,10 @@ void __init setup_arch(char **cmdline_p)
 	setup_dma_zone(mdesc);
 	xen_early_init();
 	efi_init();
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+	prom_meminit();
+#endif
+
 	/*
 	 * Make sure the calculation for lowmem/highmem is set appropriately
 	 * before reserving/allocating any memory
@@ -1196,6 +1346,7 @@ void __init setup_arch(char **cmdline_p)
 	if (mdesc->init_early)
 		mdesc->init_early();
 }
+#pragma GCC diagnostic pop
 
 
 static int __init topology_init(void)
@@ -1326,6 +1477,11 @@ static int c_show(struct seq_file *m, void *v)
 	seq_printf(m, "Revision\t: %04x\n", system_rev);
 	seq_printf(m, "Serial\t\t: %s\n", system_serial);
 
+#if defined(CONFIG_MP_PLATFORM_ARM_32bit_PORTING)
+	seq_puts(m, "\n");
+	seq_printf(m, "Hardware\t: %s\n", machine_name);
+#endif
+
 	return 0;
 }
 
@@ -1350,3 +1506,16 @@ const struct seq_operations cpuinfo_op = {
 	.stop	= c_stop,
 	.show	= c_show
 };
+
+#ifdef CONFIG_PLAT_MSTAR
+/* add this to replace read_cpuid_part_number(), using get_cpu_midr can specify the cpu, and get the cpu_part_number of wanted cpu */
+unsigned int get_cpu_midr(int cpu)
+{
+	/* the cpu_id from read_cpuid_id() will get the cpu_id of current_cpu, so we add this to return a cpu_id of specified_cpu */
+	struct cpuinfo_arm *cpuinfo = &per_cpu(cpu_data, cpu);
+	u32 midr = cpuinfo->cpuid;	// the cpuid of each will be set from "secondary_start_kernel() ==> smp_store_cpu_info(cpu)" and "smp_prepare_cpus() ==> smp_store_cpu_info()"
+
+	return midr;
+}
+EXPORT_SYMBOL(get_cpu_midr);
+#endif

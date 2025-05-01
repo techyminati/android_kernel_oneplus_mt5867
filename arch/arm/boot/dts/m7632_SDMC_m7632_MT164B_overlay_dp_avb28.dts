@@ -1,0 +1,99 @@
+/dts-v1/;
+/plugin/;
+/include/ "overlay_avb_SysAsRoot.dtsi"
+
+//// {
+ //   fragment@0 {
+ //       target = <&i2c1>;
+ ////       __overlay__ {
+ //           compatible = "mstar,swi2c";
+//			sda-gpio = <82>;   
+//			scl-gpio = <81>;
+			//iic-mode = <1>;     /* i2c-mode: 0:swi2c; 1:hwi2c */
+//			//pad-mux = <0>;      /* hwi2c setting: pad mux */
+ //       };
+ //   };
+//};
+
+&mali_gop_dma {
+	heaptype = <0>;
+	max_size = <0x0 0x8000000>;
+	normal_zone = <0>;
+};
+
+
+&i2c1 {
+	sda-gpio = <82>;   
+	scl-gpio = <81>;
+	iic-mode = <1>;     /* i2c-mode: 0:swi2c; 1:hwi2c */
+	pad-mux = <0>;      /* hwi2c setting: pad mux */
+};
+&i2c1 {
+	dlp:dlp@1b{
+		compatible = "anker, dlp";
+		reg = <0x1b>;
+		status = "okay";
+	};
+	at24: at24@54 {
+		compatible = "at24,24c32";
+		status = "okay";
+		reg = <0x54>;
+	};
+};
+&i2c2 {
+	iic-mode = <1>;     /* i2c-mode: 0:swi2c; 1:hwi2c */
+	bus-index = <2>;    /* swi2c setting: bus index */
+	sda-gpio = <64>;   /* swi2c setting: sda pad */
+	scl-gpio = <63>;   /* swi2c setting: scl pad */
+	def-delay = <100>;  /* swi2c setting: clk */
+	hw-port = <2>;      /* hwi2c setting: port */
+	pad-mux = <19>;      /* hwi2c setting: pad mux */
+	speed-khz = <100>;  /* hwi2c setting: clk */
+	retries = <5>;      /* Unused */
+	status = "okay";    /* Unused */
+
+	touch:touch@28{
+		compatible = "anker,touch";
+		reg = <0x28>;
+		touch_irq = <133>;
+ 		status = "okay";
+ 	};
+	lsm6dsm:lsm6dsm@6a {
+		compatible = "st,lsm6dsm";
+		reg = <0x6a>;
+		int-gpio = <95>;
+		st,drdy-int-pin = <1>;
+		status = "okay";
+	};
+};
+&stepper_motor {
+	compatible = "anker, motor";
+		dev_name = "motor";
+		status = "okay";
+		
+		m_gpio0 =  <146>;
+		m_gpio1 =  <147>;
+		m_gpio2 =  <148>;
+		m_gpio3 =  <149>;
+
+		m_place0 =  <152>;
+		m_place1 =  <144>;
+	};
+
+&mmc_host_sdio {
+	sdio-padmux = <0>;
+};
+&spi0 {
+	compatible = "mstar,mstar-mspi";
+	reg = <0 0 0x2A7400 0x1000>;
+    interrupts = <43>;
+    mspi_channel = <0>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+	spidev@1{
+		compatible = "spidev";
+		reg = <0x0>;
+		spi-max-frequency = <2000000>;
+	};
+};

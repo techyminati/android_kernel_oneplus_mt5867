@@ -31,6 +31,9 @@
 #include <linux/completion.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+#include <linux/reboot.h>
+#endif
 
 /*
  * One option can be changed at boot time as follows:
@@ -363,7 +366,12 @@ static int apm_open(struct inode * inode, struct file * filp)
 		 * we might close the device immediately without doing a
 		 * privileged operation -- cevans
 		 */
+#if defined(CONFIG_MSTAR_PM)
+                //user in android system, ignore it.
+                as->suser = 1;
+#else
 		as->suser = capable(CAP_SYS_ADMIN);
+#endif
 		as->writer = (filp->f_mode & FMODE_WRITE) == FMODE_WRITE;
 		as->reader = (filp->f_mode & FMODE_READ) == FMODE_READ;
 
@@ -382,6 +390,9 @@ static const struct file_operations apm_bios_fops = {
 	.read		= apm_read,
 	.poll		= apm_poll,
 	.unlocked_ioctl	= apm_ioctl,
+#if defined(CONFIG_COMPAT)
+        .compat_ioctl   = apm_ioctl,
+#endif
 	.open		= apm_open,
 	.release	= apm_release,
 	.llseek		= noop_llseek,
@@ -574,6 +585,15 @@ static int apm_suspend_notifier(struct notifier_block *nb,
 					atomic_dec(&suspend_acks_pending);
 				}
 			}
+
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+                        if (pm_power_off)
+                        {
+                            printk("APM timeout, we will shutdown the system !!!\n");
+                            kernel_power_off();
+                        }
+#endif
+
 			up_read(&user_list_lock);
 			mutex_unlock(&state_lock);
 		}

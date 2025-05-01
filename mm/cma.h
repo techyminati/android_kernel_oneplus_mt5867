@@ -5,6 +5,10 @@
 #include <linux/debugfs.h>
 #include <linux/kobject.h>
 
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+#define CMA_FAKEMEM 0x01
+#endif
+
 struct cma_kobject {
 	struct kobject kobj;
 	struct cma *cma;
@@ -16,12 +20,21 @@ struct cma {
 	unsigned long   *bitmap;
 	unsigned int order_per_bit; /* Order of pages represented by one bit */
 	spinlock_t	lock;
+#ifdef CONFIG_MSTAR_CHIP
+	struct mutex    mlock;
+#endif
 #ifdef CONFIG_CMA_DEBUGFS
 	struct hlist_head mem_head;
 	spinlock_t mem_head_lock;
 	struct debugfs_u32_array dfs_bitmap;
 #endif
+#ifdef CONFIG_MP_CMA_PATCH_COUNT_TIMECOST
+	struct cma_measurement *cma_measurement_ptr;
+#endif
 	char name[CMA_MAX_NAME];
+#ifdef CONFIG_MP_ION_PATCH_FAKE_MEM
+	unsigned int flags;				// cma area flags, example:CMA_FAKEMEM
+#endif
 #ifdef CONFIG_CMA_SYSFS
 	/* the number of CMA page successful allocations */
 	atomic64_t nr_pages_succeeded;
@@ -31,6 +44,29 @@ struct cma {
 	struct cma_kobject *cma_kobj;
 #endif
 };
+#if defined(CONFIG_MP_CMA_PATCH_COUNT_TIMECOST)
+# define CMA_HEAP_MEASUREMENT_LENG 96
+#endif
+
+#ifdef CONFIG_MP_CMA_PATCH_COUNT_TIMECOST
+struct cma_measurement {
+	const char *cma_heap_name;
+	unsigned int cma_heap_id;
+	struct mutex cma_measurement_lock;
+
+	/* Measure Node Start */
+	unsigned long total_alloc_size_kb;
+	unsigned long total_alloc_time_cost_ms;
+
+	unsigned long total_migration_size_kb;
+	unsigned long total_migration_time_cost_ms;
+	/* Measure Node End */
+
+	/* Reset Node Start */
+	unsigned long cma_measurement_reset;
+	/* Reset Node End */
+};
+#endif
 
 extern struct cma cma_areas[MAX_CMA_AREAS];
 extern unsigned cma_area_count;

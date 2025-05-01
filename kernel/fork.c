@@ -105,7 +105,12 @@
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
-
+#if defined(CONFIG_MP_FindTaskStatus)
+#include "mdrv_FindTaskStatus.h"
+#endif
+#if defined(CONFIG_MP_BENCHMARK_ACCEL87) || defined(CONFIG_MP_BENCHMARK_CPU_DVFS_SCALING)
+#include "mdrv_benchmark_optimize.h"
+#endif
 #include <trace/events/sched.h>
 
 #define CREATE_TRACE_POINTS
@@ -113,6 +118,7 @@
 
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/sched.h>
+unsigned long mask_TVOS_exclusive_core_0 = 0x1;
 /*
  * Minimum number of threads to boot the kernel
  */
@@ -190,6 +196,36 @@ static inline void free_task_struct(struct task_struct *tsk)
  * Allocate pages if THREAD_SIZE is >= PAGE_SIZE, otherwise use a
  * kmemcache based allocator.
  */
+# if THREAD_SIZE >= PAGE_SIZE
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+#define LIST_CACHE_CNT  512 * 1
+atomic_t thread_info_cache_cnt = ATOMIC_INIT(0);
+static struct list_head thread_info_cache_list;
+spinlock_t thread_info_cache_lock;
+#endif
+
+#ifdef CONFIG_MP_DEBUG_TOOL_THREAD_CREATE_MONITOR
+int get_proc_thread_cnt(struct task_struct *p, int *dead_cnt)
+{
+	struct task_struct *t;
+	int cnt = 0;
+	*dead_cnt = 0;
+
+	for_each_thread(p, t) {
+		cnt++;
+		if(t->state == TASK_DEAD)
+			(*dead_cnt)++;
+	}
+	return cnt;
+}
+
+void notify_alloc_thread_info(struct thread_info *thread_info);
+void notify_alloc_thread_free(struct thread_info *thread_info);
+void show_thread_trace_info(void);
+uint32_t last_prt_jiffies = 0;
+#endif
+#endif
+
 # if THREAD_SIZE >= PAGE_SIZE || defined(CONFIG_VMAP_STACK)
 
 #ifdef CONFIG_VMAP_STACK
@@ -269,9 +305,51 @@ static unsigned long *alloc_thread_stack_node(struct task_struct *tsk, int node)
 	}
 	return stack;
 #else
-	struct page *page = alloc_pages_node(node, THREADINFO_GFP,
-					     THREAD_SIZE_ORDER);
+	struct page *page;
 
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+	unsigned long flags;
+	if (atomic_read(&thread_info_cache_cnt) <= 10) {
+#ifdef CONFIG_MP_DEBUG_TOOL_THREAD_CREATE_MONITOR
+		spin_lock_irqsave(&thread_info_cache_lock, flags);
+		if (jiffies - last_prt_jiffies > 30 * HZ) {
+			show_thread_trace_info();
+			last_prt_jiffies = jiffies;
+		}
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+#endif
+	}
+
+	spin_lock_irqsave(&thread_info_cache_lock, flags);
+
+	if(atomic_add_unless(&thread_info_cache_cnt, -1, 0))
+	{
+		struct list_head *list;
+		BUG_ON(list_empty(&thread_info_cache_list));
+		list = thread_info_cache_list.next;
+		list_del(list);
+		page = container_of(list, struct page, lru);
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+	}
+    else
+#endif
+	{
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+#endif
+		page = alloc_pages_node(node, THREADINFO_GFP,
+					THREAD_SIZE_ORDER);
+	}
+
+#ifdef CONFIG_MP_DEBUG_TOOL_THREAD_CREATE_MONITOR
+	if(page)
+	{
+		spin_lock_irqsave(&thread_info_cache_lock, flags);
+		printk("\033[31mFunction = %s, Line = %d, notify_alloc_thread_info is not ready, thread_info is not in task->stack\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+		//notify_alloc_thread_info((struct thread_info *)page_address(page));
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+	}
+#endif
 	if (likely(page)) {
 		tsk->stack = kasan_reset_tag(page_address(page));
 		return tsk->stack;
@@ -304,8 +382,60 @@ static inline void free_thread_stack(struct task_struct *tsk)
 	}
 #endif
 
-	__free_pages(virt_to_page(tsk->stack), THREAD_SIZE_ORDER);
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+	unsigned long flags;
+#ifdef CONFIG_MP_DEBUG_TOOL_THREAD_CREATE_MONITOR
+	spin_lock_irqsave(&thread_info_cache_lock, flags);
+	printk("\033[31mFunction = %s, Line = %d, notify_alloc_thread_free is not ready. thread_info is not in task->stack\033[m\n", __PRETTY_FUNCTION__, __LINE__);
+	//notify_alloc_thread_free(tsk->stack);
+	spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+#endif
+	spin_lock_irqsave(&thread_info_cache_lock, flags);
+	if(tsk->stack && atomic_read(&thread_info_cache_cnt) < LIST_CACHE_CNT)
+    {
+		struct page *page = virt_to_page((void *)tsk->stack);
+		list_add(&page->lru, &thread_info_cache_list);
+		atomic_inc(&thread_info_cache_cnt);
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+    }
+	else
+#endif
+	{
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+#endif
+		__free_pages(virt_to_page(tsk->stack), THREAD_SIZE_ORDER);
+	}
 }
+
+#ifdef CONFIG_MP_CMA_PATCH_DO_FORK_PAGE_POOL
+void __init thread_stack_cache_init(void)
+{
+
+	struct page *page;
+	unsigned long flags;
+
+	INIT_LIST_HEAD(&thread_info_cache_list);
+	atomic_set(&thread_info_cache_cnt, 0);
+	spin_lock_init(&thread_info_cache_lock);
+
+	while(atomic_read(&thread_info_cache_cnt) < LIST_CACHE_CNT)
+	{
+		page = alloc_pages_node(NUMA_NO_NODE, THREADINFO_GFP,
+									THREAD_SIZE_ORDER);
+
+		spin_lock_irqsave(&thread_info_cache_lock, flags);
+		if(page)
+		{
+			list_add(&page->lru, &thread_info_cache_list);
+			atomic_inc(&thread_info_cache_cnt);
+		}
+		spin_unlock_irqrestore(&thread_info_cache_lock, flags);
+	}
+	printk(KERN_ERR "\033[31mthread_info_cache_init, allocating %d thread_pool is done\033[m\n", LIST_CACHE_CNT);
+}
+#endif
+
 # else
 static struct kmem_cache *thread_stack_cache;
 
@@ -2616,7 +2746,7 @@ struct task_struct *create_io_thread(int (*fn)(void *), void *arg, int node)
  *
  * args->exit_signal is expected to be checked for sanity by the caller.
  */
-pid_t kernel_clone(struct kernel_clone_args *args)
+ pid_t kernel_clone(struct kernel_clone_args *args)
 {
 	u64 clone_flags = args->flags;
 	struct completion vfork;
@@ -2704,6 +2834,24 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	put_pid(pid);
 	return nr;
 }
+
+ 
+#if defined(CONFIG_MP_BENCHMARK_CPU_DVFS_SCALING)
+struct task_struct *bench_boost_sensor=NULL;
+struct task_struct *app_boost_sensor=NULL;
+struct cpu_scaling_list *bench_boost_list = NULL;
+struct cpu_scaling_list *app_boost_list = NULL;
+extern struct mutex app_boost_list_lock;
+extern struct mutex bench_boost_list_lock;
+#endif
+#if defined(CONFIG_MP_BENCHMARK_ACCEL87)
+struct task_struct *accel87_sensor=NULL;
+struct cpu_scaling_list *accel87_list_head = NULL;
+extern struct mutex accel87_list_lock;
+
+extern struct cpu_scaling_list *TVOS_list_head;
+#endif
+
 
 /*
  * Create a kernel thread.

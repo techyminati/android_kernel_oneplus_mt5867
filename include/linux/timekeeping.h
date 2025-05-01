@@ -313,5 +313,34 @@ void read_persistent_wall_and_boot_offset(struct timespec64 *wall_clock,
 #ifdef CONFIG_GENERIC_CMOS_UPDATE
 extern int update_persistent_clock64(struct timespec64 now);
 #endif
+static inline void do_gettimeofday(struct timeval *tv)
+{
+	struct timespec64 now;
+
+	ktime_get_real_ts64(&now);
+	tv->tv_sec = now.tv_sec;
+	tv->tv_usec = now.tv_nsec/1000;
+}
+
+static inline struct timespec current_kernel_time(void)
+{
+	struct timespec64 ts64;
+	ktime_get_coarse_real_ts64(&ts64);
+	return timespec64_to_timespec(ts64);
+}
+
+static inline void ktime_get_real_ts(struct timespec *ts)
+{
+	struct timespec64 ts64;
+	ktime_get_real_ts64(&ts64);
+	*ts = timespec64_to_timespec(ts64);
+}
+static inline void getrawmonotonic(struct timespec *ts)
+{
+	struct timespec64 ts64;
+
+	ktime_get_raw_ts64(&ts64);
+	*ts = timespec64_to_timespec(ts64);
+}
 
 #endif

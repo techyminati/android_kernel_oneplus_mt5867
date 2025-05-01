@@ -13,7 +13,14 @@
 #include <trace/hooks/iommu.h>
 
 #include <asm/cacheflush.h>
+#include <mstar/mpatch_macro.h>
 
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+const struct dma_map_ops *dma_ops;		// this is for mstar flush bufferable memory
+#include "chip_setup.h"
+
+EXPORT_SYMBOL(dma_ops);
+#endif
 void arch_sync_dma_for_device(phys_addr_t paddr, size_t size,
 		enum dma_data_direction dir)
 {

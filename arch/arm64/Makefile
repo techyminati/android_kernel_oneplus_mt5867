@@ -121,11 +121,73 @@ CHECKFLAGS	+= -D__AARCH64EB__
 KBUILD_LDFLAGS	+= -EB $(call ld-option, -maarch64elfb, -maarch64linuxb -z norelro)
 UTS_MACHINE	:= aarch64_be
 else
+machine-$(CONFIG_MSTAR_MOONEY)		+= ../../../../mstar2/hal/mooney/cpu/arm64
+machine-$(CONFIG_MSTAR_MANHATTAN)	+= ../../../../mstar2/hal/manhattan/cpu/arm64
+machine-$(CONFIG_MSTAR_MASERATI)	+= ../../../../mstar2/hal/maserati/cpu/arm64
+machine-$(CONFIG_MSTAR_MAXIM)		+= ../../../../mstar2/hal/maxim/cpu/arm64
+machine-$(CONFIG_MSTAR_MAINZ)		+= ../../../../mstar2/hal/mainz/cpu/arm64
+machine-$(CONFIG_MSTAR_M5621)		+= ../../../../mstar2/hal/m5621/cpu/arm64
+machine-$(CONFIG_MSTAR_M7621)		+= ../../../../mstar2/hal/m7621/cpu/arm64
+machine-$(CONFIG_MSTAR_M7221)		+= ../../../../mstar2/hal/m7221/cpu/arm64
+machine-$(CONFIG_MSTAR_M7322)		+= ../../../../mstar2/hal/m7322/cpu/arm64
+machine-$(CONFIG_MSTAR_M7332)		+= ../../../../mstar2/hal/m7332/cpu/arm64
+machine-$(CONFIG_MSTAR_M7622)		+= ../../../../mstar2/hal/m7622/cpu/arm64
+machine-$(CONFIG_MSTAR_M7632)		+= ../../../../mstar2/hal/m7632/cpu/arm64
+machine-$(CONFIG_MSTAR_M7642)		+= ../../../../mstar2/hal/m7642/cpu/arm64
+machine-$(CONFIG_MSTAR_MT5862)		+= ../../../../mstar2/hal/mt5862/cpu/arm64
+machine-$(CONFIG_MSTAR_MT5867)		+= ../../../../mstar2/hal/mt5867/cpu/arm64
+machine-$(CONFIG_MSTAR_MT5889)		+= ../../../../mstar2/hal/mt5889/cpu/arm64
+machine-$(CONFIG_MSTAR_MT5872)          += ../../../../mstar2/hal/mt5872/cpu/arm64
+
+ifeq ($(CONFIG_MP_MSTAR_STR_BASE),y)
+  mstar_chip = $(subst ",,$(CONFIG_MSTAR_CHIP_NAME))
+  ifneq ($(wildcard drivers/mstar2/hal/$(mstar_chip)/cpu/arm64/mstar_strmisc_chip.h),)
+    KBUILD_CPPFLAGS += -DMSTAR_STRMISC_CHIP
+  endif
+endif
+
+KBUILD_CPPFLAGS += -Iarch/arm64/include
+KBUILD_CPPFLAGS += -Idrivers/mstar2
+ifeq ($(CONFIG_ONEHAL_ARCH_SUPPORT),y)
+ONEHAL_VERSION= $(subst ",,$(CONFIG_ONEHAL_VERSION))
+ONEHAL_DIR = ver_$(ONEHAL_VERSION)
+KBUILD_CPPFLAGS	+=  -Idrivers/mstar2/hal/$(subst ",,$(CONFIG_MSTAR_CHIP_NAME))/cpu/arm64/$(ONEHAL_DIR)
+KBUILD_CPPFLAGS	+=  -Idrivers/mstar2/hal/$(subst ",,$(CONFIG_MSTAR_CHIP_NAME))/miu/$(ONEHAL_DIR)
+KBUILD_CPPFLAGS +=  -Idrivers/mstar2/hal/$(subst ",,$(CONFIG_MSTAR_CHIP_NAME))/gpio/$(ONEHAL_DIR)
+endif
+
+
+# Platform directory name.  This list is sorted alphanumerically
+plat-$(CONFIG_PLAT_MSTAR)    += mstar
+
+ifneq ($(CONFIG_MSTAR_CHIP),)
+MACHINE  := arch/arm64/arm-boards/$(word 1,$(machine-y))/
+machdirs := $(patsubst %,arch/arm64/arm-boards/%/,$(machine-y))
+platdirs := $(patsubst %,arch/arm64/arm-boards/plat-%/,$(plat-y))
+core-y += arch/arm64/arm-boards/generic/
+core-y += $(machdirs)
+#core-y += ../mstar2/hal/$(subst ",,$(CONFIG_MSTAR_CHIP_NAME))/cpu/arm64/
+
+ifeq ($(KBUILD_SRC),)
+KBUILD_CPPFLAGS += $(patsubst %,-I%/include,$(machdirs) $(platdirs))
+KBUILD_CPPFLAGS += $(patsubst %,-I%,$(machdirs) $(platdirs))
+else
+KBUILD_CPPFLAGS += $(patsubst %,-I$(srctree)/%/include,$(machdirs) $(platdirs))
+KBUILD_CPPFLAGS += $(patsubst %,-I$(srctree)/%,$(machdirs) $(platdirs))
+endif
+endif
+
+ifeq ($(CONFIG_MSTAR_CHIP_NAME), $(filter $(CONFIG_MSTAR_CHIP_NAME), "kano" "maserati" "m7821" "m7322" "m7622"))
 KBUILD_CPPFLAGS	+= -mlittle-endian
 CHECKFLAGS	+= -D__AARCH64EL__
 # Same as above, prefer ELF but fall back to linux target if needed.
 KBUILD_LDFLAGS	+= -EL $(call ld-option, -maarch64elf, -maarch64linux -z norelro)
 UTS_MACHINE	:= aarch64
+else
+KBUILD_CPPFLAGS	+= -mlittle-endian -Wl,-fix-cortex-a53-843419
+AS		+= -EL -fix-cortex-a53-843419
+UTS_MACHINE	:= aarch64
+endif
 endif
 
 ifeq ($(CONFIG_LD_IS_LLD), y)
@@ -157,19 +219,20 @@ libs-$(CONFIG_EFI_STUB) += $(objtree)/drivers/firmware/efi/libstub/lib.a
 
 # Default target when executing plain make
 boot		:= arch/arm64/boot
+ifeq ($(CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE),y)
+KBUILD_IMAGE	:= $(boot)/$(subst $\",,$(CONFIG_BUILD_ARM64_APPENDED_KERNEL_IMAGE_NAME))
+else
 KBUILD_IMAGE	:= $(boot)/Image.gz
-
+endif
 # Don't compile Image in mixed build with "all" target
 ifndef KBUILD_MIXED_TREE
 all:	Image.gz
 endif
 
 
-Image: vmlinux
-	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
+Image Image.gz uImage zuImage zImage uImage-dtb: vmlinux
+	$(Q)$(MAKE) $(build)=$(boot)  MACHINE=$(MACHINE) $(boot)/$@
 
-Image.%: Image
-	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
 install: install-image := Image
 zinstall: install-image := Image.gz

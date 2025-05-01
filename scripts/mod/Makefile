@@ -3,9 +3,11 @@ OBJECT_FILES_NON_STANDARD := y
 CFLAGS_REMOVE_empty.o += $(CC_FLAGS_LTO)
 
 hostprogs-always-y	+= modpost mk_elfconfig
+
 always-y		+= empty.o
 
-modpost-objs	:= modpost.o file2alias.o sumversion.o
+#tmp change bypass md5sum check
+modpost-objs  := modpost.o file2alias.o sumversion.o
 
 devicetable-offsets-file := devicetable-offsets.h
 

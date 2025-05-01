@@ -13,9 +13,12 @@
 
 #define PSCI_POWER_STATE_TYPE_STANDBY		0
 #define PSCI_POWER_STATE_TYPE_POWER_DOWN	1
+#define PSCI_RET_EOPNOTSUPP            -1
 
 bool psci_tos_resident_on(int cpu);
 
+int mstar_psci_cpu_init_idle(unsigned int cpu);
+int mstar_psci_cpu_suspend_enter(unsigned long index);
 int psci_cpu_suspend_enter(u32 state);
 bool psci_power_state_is_valid(u32 state);
 int psci_set_osi_mode(bool enable);
@@ -42,7 +45,7 @@ struct psci_0_1_function_ids {
 };
 
 struct psci_0_1_function_ids get_psci_0_1_function_ids(void);
-
+void __init psci_arm32_init(void);
 #if defined(CONFIG_ARM_PSCI_FW)
 int __init psci_dt_init(void);
 #else

@@ -15,6 +15,7 @@
 typedef long		__kernel_long_t;
 typedef unsigned long	__kernel_ulong_t;
 #endif
+typedef __kernel_long_t	__kernel_time_t;
 
 #ifndef __kernel_ino_t
 typedef __kernel_ulong_t __kernel_ino_t;

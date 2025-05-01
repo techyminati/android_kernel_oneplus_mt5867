@@ -70,6 +70,7 @@ extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);
 extern void arch_send_wakeup_ipi_mask(const struct cpumask *mask);
 
 extern int register_ipi_completion(struct completion *completion, int cpu);
+extern volatile int pen_release;
 
 struct smp_operations {
 #ifdef CONFIG_SMP
@@ -96,6 +97,9 @@ struct smp_operations {
 	void (*cpu_die)(unsigned int cpu);
 	bool  (*cpu_can_disable)(unsigned int cpu);
 	int  (*cpu_disable)(unsigned int cpu);
+#endif
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+	int (*cpu_suspend)(unsigned long index,void *entry_point);
 #endif
 #endif
 };

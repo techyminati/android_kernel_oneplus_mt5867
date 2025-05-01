@@ -1,4 +1,14 @@
 # SPDX-License-Identifier: GPL-2.0
+
+#defined by mstar
+config MSTAR_CHIP
+        bool
+        default y
+
+#defined by mstar for arm-boards
+config HAVE_SCHED_CLOCK
+        bool
+
 config ARM
 	bool
 	default y
@@ -266,12 +276,9 @@ config NEED_MACH_MEMORY_H
 
 config PHYS_OFFSET
 	hex "Physical address of main memory" if MMU
-	depends on !ARM_PATCH_PHYS_VIRT
+	depends on !ARM_PATCH_PHYS_VIRT &&  !NEED_MACH_MEMORY_H
 	default DRAM_BASE if !MMU
-	default 0x00000000 if ARCH_FOOTBRIDGE
-	default 0x10000000 if ARCH_OMAP1 || ARCH_RPC
-	default 0x20000000 if ARCH_S5PV210
-	default 0xc0000000 if ARCH_SA1100
+	default 0x20000000 if ARCH_MSTAR
 	help
 	  Please provide the physical address corresponding to the
 	  location of main memory in your system.
@@ -314,17 +321,15 @@ choice
 config ARCH_MULTIPLATFORM
 	bool "Allow multiple platforms to be selected"
 	depends on MMU
-	select ARCH_FLATMEM_ENABLE
-	select ARCH_SPARSEMEM_ENABLE
-	select ARCH_SELECT_MEMORY_MODEL
 	select ARM_HAS_SG_CHAIN
 	select ARM_PATCH_PHYS_VIRT
 	select AUTO_ZRELADDR
 	select TIMER_OF
 	select COMMON_CLK
+	select GENERIC_CLOCKEVENTS
 	select GENERIC_IRQ_MULTI_HANDLER
-	select HAVE_PCI
-	select PCI_DOMAINS_GENERIC if PCI
+	select MIGHT_HAVE_PCI
+	select PCI_DOMAINS if PCI
 	select SPARSE_IRQ
 	select USE_OF
 
@@ -336,9 +341,43 @@ config ARM_SINGLE_ARMV7M
 	select TIMER_OF
 	select COMMON_CLK
 	select CPU_V7M
+	select GENERIC_CLOCKEVENTS
 	select NO_IOPORT_MAP
 	select SPARSE_IRQ
 	select USE_OF
+
+config ARCH_MSTAR
+        bool "Mstar ARM-based"
+        select ARM_AMBA
+        select ARCH_HAS_CPUFREQ
+        select CLKDEV_LOOKUP
+        select GENERIC_CLOCKEVENTS
+        select ARCH_SCHED_CLOCK
+        select HAVE_CLK
+        select HAVE_SMP
+        select PLAT_MSTAR
+        select MSTAR_CHIP
+        select ARCH_HAS_HOLES_MEMORYMODEL
+        select COMMON_CLK
+        select ARCH_FLATMEM_ENABLE
+        select HAVE_ARM_TWD if (SMP || MP_PLATFORM_SINGLE_CORE_PRIVATE_TIMER)
+	select ARM_HAS_SG_CHAIN
+        help
+          Support mstar chip porting
+
+config ARCH_EBSA110
+	bool "EBSA-110"
+	select ARCH_USES_GETTIMEOFFSET
+	select CPU_SA110
+	select ISA
+	select NEED_MACH_IO_H
+	select NEED_MACH_MEMORY_H
+	select NO_IOPORT_MAP
+	help
+	  This is an evaluation board for the StrongARM processor available
+	  from Digital. It has limited hardware on-board, including an
+	  Ethernet interface, two PCMCIA sockets, two serial ports and a
+	  parallel port.
 
 config ARCH_EP93XX
 	bool "EP93xx-based"
@@ -709,6 +748,10 @@ source "arch/arm/mach-vt8500/Kconfig"
 
 source "arch/arm/mach-zynq/Kconfig"
 
+source "arch/arm/plat-versatile/Kconfig"
+
+source "arch/arm/plat-mstar/Kconfig"
+
 # ARMv7-M architecture
 config ARCH_LPC18XX
 	bool "NXP LPC18xx/LPC43xx"
@@ -757,7 +800,17 @@ config PLAT_PXA
 config PLAT_VERSATILE
 	bool
 
+config PLAT_MSTAR
+        bool
+
+
+
 source "arch/arm/mm/Kconfig"
+
+config ARM_NR_BANKS
+	int
+	default 16 if ARCH_EP93XX
+	default 8
 
 config IWMMXT
 	bool "Enable iWMMXt support"
@@ -1260,6 +1313,8 @@ choice
 	config VMSPLIT_3G_OPT
 		depends on !ARM_LPAE
 		bool "3G/1G user/kernel split (for full 1G low memory)"
+	config VMSPLIT_2_5G
+		bool "2.5G/1.5G user/kernel split"
 	config VMSPLIT_2G
 		bool "2G/2G user/kernel split"
 	config VMSPLIT_1G
@@ -1271,6 +1326,7 @@ config PAGE_OFFSET
 	default PHYS_OFFSET if !MMU
 	default 0x40000000 if VMSPLIT_1G
 	default 0x80000000 if VMSPLIT_2G
+	default 0xA0000000 if VMSPLIT_2_5G
 	default 0xB0000000 if VMSPLIT_3G_OPT
 	default 0xC0000000
 
@@ -1279,9 +1335,11 @@ config KASAN_SHADOW_OFFSET
 	depends on KASAN
 	default 0x1f000000 if PAGE_OFFSET=0x40000000
 	default 0x5f000000 if PAGE_OFFSET=0x80000000
+	default 0x7f000000 if PAGE_OFFSET=0xA0000000
 	default 0x9f000000 if PAGE_OFFSET=0xC0000000
 	default 0x8f000000 if PAGE_OFFSET=0xB0000000
 	default 0xffffffff
+
 
 config NR_CPUS
 	int "Maximum number of CPUs (2-32)"
@@ -1313,6 +1371,16 @@ config ARM_PSCI
 	  management operations described in ARM document number ARM DEN
 	  0022A ("Power State Coordination Interface System Software on
 	  ARM processors").
+
+config LOCAL_TIMERS
+        bool "Use local timer interrupts"
+        depends on SMP
+        default y
+        help
+          Enable support for local timers on SMP platforms, rather then the
+          legacy IPI broadcast method.  Local timers allows the system
+          accounting to be spread across the timer interval, preventing a
+          "thundering herd" at every timer tick.
 
 # The GPIO number here must be sorted by descending number. In case of
 # a multiplatform kernel, we just want the highest value required by the
@@ -1889,6 +1957,11 @@ config DMI
 	  decide whether certain workarounds for buggy hardware and/or
 	  firmware need to be enabled. This would require the DMI subsystem
 	  to be enabled much earlier than we do on ARM, which is non-trivial.
+
+config MEMORY_START_ADDRESS
+        hex "Physical address of the memory starting"
+        default 0x40000000 if ((MSTAR_EIFFEL || MSTAR_EDISON || MSTAR_EINSTEIN) && ANDROID)
+        default 0x40400000 if ((MSTAR_EIFFEL || MSTAR_EDISON || MSTAR_EINSTEIN) && !ANDROID)
 
 endmenu
 

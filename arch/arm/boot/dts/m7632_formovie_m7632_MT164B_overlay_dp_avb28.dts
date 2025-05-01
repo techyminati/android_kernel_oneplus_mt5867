@@ -1,0 +1,70 @@
+/dts-v1/;
+/plugin/;
+/include/ "overlay_avb_SysAsRoot.dtsi"
+
+&i2c0 {
+	iic-mode = <1>;     /* i2c-mode: 0:swi2c; 1:hwi2c */
+	bus-index = <0>;    /* swi2c setting: bus index */
+	sda-gpio = <82>;    /* swi2c setting: sda pad */
+	scl-gpio = <81>;    /* swi2c setting: scl pad */
+	def-delay = <100>;  /* swi2c setting: clk */
+	hw-port = <0>;      /* hwi2c setting: port */
+	pad-mux = <1>;     /* hwi2c setting: pad mux */
+	speed-khz = <100>;  /* hwi2c setting: clk */
+	retries = <5>;      /* Unused */
+	status = "okay";    /* Unused */
+};
+&i2c1 {
+	iic-mode = <1>;     /* i2c-mode: 0:swi2c; 1:hwi2c */
+	bus-index = <2>;    /* swi2c setting: bus index */
+	sda-gpio = <55>;   /* swi2c setting: sda pad */
+	scl-gpio = <54>;   /* swi2c setting: scl pad */
+	def-delay = <100>;  /* swi2c setting: clk */
+	hw-port = <3>;      /* hwi2c setting: port */
+	pad-mux = <25>;      /* hwi2c setting: pad mux */
+	speed-khz = <100>;  /* hwi2c setting: clk */
+	retries = <5>;      /* Unused */
+	status = "okay";    /* Unused */
+};
+&i2c2 {
+	iic-mode = <1>;     /* i2c-mode: 0:swi2c; 1:hwi2c */
+	bus-index = <2>;    /* swi2c setting: bus index */
+	sda-gpio = <64>;   /* swi2c setting: sda pad */
+	scl-gpio = <63>;   /* swi2c setting: scl pad */
+	def-delay = <100>;  /* swi2c setting: clk */
+	hw-port = <2>;      /* hwi2c setting: port */
+	pad-mux = <19>;      /* hwi2c setting: pad mux */
+	speed-khz = <100>;  /* hwi2c setting: clk */
+	retries = <5>;      /* Unused */
+	status = "okay";    /* Unused */
+
+	thermal_mcu: thermal_mcu@42 {
+		compatible = "fm_thermal_mcu";
+		status = "okay";
+		reg = <0x42>;
+	};
+	vcnl4200: vcnl4200@51{
+		compatible = "vcnl4200";
+		status = "okay";
+		reg = <0x51>;
+	};
+	at24: at24@54 {
+		compatible = "at24,24c32";
+		status = "okay";
+		reg = <0x54>;
+	};
+};
+
+&mmc_host_sdio {
+	sdio-padmux = <0>;
+};
+
+&stepper_motor {
+	compatible = "formovie, stepper_motor";
+	status = "okay";
+};
+
+&ehci_2 {
+	utmi,eye-param = /bits/ 8 <0x22 0x02 0x00 0x81>;
+};
+

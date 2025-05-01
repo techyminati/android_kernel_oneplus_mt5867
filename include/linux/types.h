@@ -5,6 +5,10 @@
 #define __EXPORTED_HEADERS__
 #include <uapi/linux/types.h>
 
+#ifdef CONFIG_MP_DEBUG_TOOL_CHANGELIST
+#include <linux/release_version.h>
+#endif
+
 #ifndef __ASSEMBLY__
 
 #define DECLARE_BITMAP(name,bits) \
@@ -64,6 +68,12 @@ typedef __kernel_ssize_t	ssize_t;
 #define _PTRDIFF_T
 typedef __kernel_ptrdiff_t	ptrdiff_t;
 #endif
+
+#ifndef _TIME_T
+#define _TIME_T
+typedef __kernel_time_t		time_t;
+#endif
+
 
 #ifndef _CLOCK_T
 #define _CLOCK_T

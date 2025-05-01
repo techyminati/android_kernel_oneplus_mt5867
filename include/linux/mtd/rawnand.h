@@ -22,12 +22,28 @@
 #include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/types.h>
+#if defined(CONFIG_PLAT_MSTAR)
+#include <mstar/mpatch_macro.h>
+#endif
 
 struct nand_chip;
 struct gpio_desc;
 
 /* The maximum number of NAND chips in an array */
 #define NAND_MAX_CHIPS		8
+
+#if (defined(CONFIG_MSTAR_NAND) || defined(CONFIG_MSTAR_SPI_NAND)) && (MP_NAND_MTD == 1)
+/* the number of blocks reserved for bad block table */
+#define NAND_BBT_BLOCK_NUM  4
+#endif
+
+# if (MP_NAND_BBT == 1)
+/* the number of blocks reserved for bad block table */
+#define NAND_BBT_BLOCK_NUM  4
+
+/* the max number of bbt block operation */
+#define NAND_RETRIES     3
+#endif
 
 /*
  * Constants for hardware specific CLE/ALE/NCE function
@@ -56,6 +72,9 @@ struct gpio_desc;
 #define NAND_CMD_READOOB	0x50
 #define NAND_CMD_ERASE1		0x60
 #define NAND_CMD_STATUS		0x70
+#if defined(CONFIG_MSTAR_NAND)
+#define NAND_CMD_STATUS_MULTI	0x71
+#endif
 #define NAND_CMD_SEQIN		0x80
 #define NAND_CMD_RNDIN		0x85
 #define NAND_CMD_READID		0x90
@@ -147,6 +166,9 @@ struct gpio_desc;
 
 /* Device needs 3rd row address cycle */
 #define NAND_ROW_ADDR_3		BIT(14)
+#if (defined(CONFIG_MSTAR_NAND) || defined(CONFIG_MSTAR_SPI_NAND)) && (MP_NAND_MTD == 1)
+#define NAND_IS_SPI		0x00008000
+#endif
 
 /* Non chip related options */
 /* This option skips the bbt scan during initialization. */
@@ -167,6 +189,11 @@ struct gpio_desc;
  * kmap'ed, vmalloc'ed highmem buffers being passed from upper layers
  */
 #define NAND_USES_DMA		BIT(20)
+#if defined(CONFIG_MSTAR_NAND)
+#define NAND_USE_BOUNCE_BUFFER	0x00080000
+#else
+#define NAND_USE_BOUNCE_BUFFER	0x00100000
+#endif
 
 /*
  * In case your controller is implementing ->legacy.cmd_ctrl() and is relying
@@ -1255,6 +1282,14 @@ struct nand_secure_region {
  */
 struct nand_chip {
 	struct nand_device base;
+#if (defined(CONFIG_MSTAR_NAND) || defined(CONFIG_MSTAR_SPI_NAND)) && (MP_NAND_MTD == 1)
+	// read from col
+	int col;
+	int bytelen;
+#endif
+#if (defined(CONFIG_MSTAR_NAND) || defined(CONFIG_MSTAR_SPI_NAND)) && (MP_NAND_MTD == 1)
+	uint32_t    bbt_crc;
+#endif
 	struct nand_id id;
 	struct nand_parameters parameters;
 	struct nand_manufacturer manufacturer;
@@ -1435,6 +1470,10 @@ struct nand_flash_dev {
 };
 
 int nand_create_bbt(struct nand_chip *chip);
+#if (MP_NAND_BBT == 1)
+extern int nand_update_td(struct mtd_info *mtd, loff_t offs);
+extern int nand_update_md(struct mtd_info *mtd, loff_t offs);
+#endif
 
 /*
  * Check if it is a SLC nand.

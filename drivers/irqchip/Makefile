@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
+ifeq ($(CONFIG_MP_PLATFORM_ARM),y)
+EXTRA_CFLAGS      +=  -I$(srctree)/drivers/mstar2/include
+endif
 obj-$(CONFIG_IRQCHIP)			+= irqchip.o
 
 obj-$(CONFIG_AL_FIC)			+= irq-al-fic.o

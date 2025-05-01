@@ -50,9 +50,15 @@
 #include <asm/tlbflush.h>
 #include <asm/ptrace.h>
 #include <asm/virt.h>
+#ifdef CONFIG_MP_DEBUG_TOOL_SYSRQ
+#include <linux/nmi.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/ipi.h>
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+#include "mdrv_types.h"
+#endif
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/debug.h>
 
@@ -78,8 +84,13 @@ enum ipi_msg_type {
 	IPI_CPU_CRASH_STOP,
 	IPI_TIMER,
 	IPI_IRQ_WORK,
+#ifdef CONFIG_MP_DEBUG_TOOL_SYSRQ
 	IPI_WAKEUP,
-	NR_IPI
+	NR_IPI,
+	IPI_CPU_BACKTRACE
+#else
+	IPI_WAKEUP
+#endif
 };
 
 static int ipi_irq_base __read_mostly;
@@ -888,6 +899,12 @@ static void ipi_cpu_crash_stop(unsigned int cpu, struct pt_regs *regs)
 #endif
 }
 
+#ifdef CONFIG_MP_DEBUG_TOOL_SYSRQ
+void nmi_trigger_cpumask_backtrace(const cpumask_t *mask,
+				   bool exclude_self,
+				   void (*raise)(cpumask_t *mask));
+bool nmi_cpu_backtrace(struct pt_regs *regs);
+#endif
 /*
  * Main handler for inter-processor interrupts
  */
@@ -919,6 +936,15 @@ static void do_handle_IPI(int ipinr)
 			unreachable();
 		}
 		break;
+#ifdef CONFIG_MP_DEBUG_TOOL_SYSRQ
+	case IPI_CPU_BACKTRACE:
+		printk_deferred_enter();
+		irq_enter();
+		nmi_cpu_backtrace(NULL);
+		irq_exit();
+		printk_deferred_exit();
+		break;
+#endif
 
 #ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
 	case IPI_TIMER:
@@ -1143,6 +1169,27 @@ bool cpus_are_stuck_in_kernel(void)
 		is_protected_kvm_enabled();
 }
 
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+void smp_clear_magic(void)
+{
+	if (TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE) {
+		writel_relaxed(0x0, (void*)PAGE_OFFSET + 0x1004); //entry point put in 0x20201004
+		writel_relaxed(0x0, (void*)PAGE_OFFSET + 0x1000); //magic put in 0x20201000
+	}
+	__cpuc_flush_kern_all();
+}
+#endif
+#ifdef CONFIG_MP_DEBUG_TOOL_SYSRQ
+static void raise_nmi(cpumask_t *mask)
+{
+	smp_cross_call(mask, IPI_CPU_BACKTRACE);
+}
+
+void arch_trigger_cpumask_backtrace(const cpumask_t *mask, bool exclude_self)
+{
+	nmi_trigger_cpumask_backtrace(mask, exclude_self, raise_nmi);
+}
+#endif
 int nr_ipi_get(void)
 {
 	return nr_ipi;

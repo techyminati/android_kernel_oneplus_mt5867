@@ -23,8 +23,31 @@
 #include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
+#include <uapi/linux/input-event-codes.h>
+#include <linux/version.h>
 #include "input-compat.h"
+#include <linux/kernel.h>
+#include <linux/string.h>
+#ifdef CONFIG_MSTAR_CHIP
+#include "input_misc.h"
+#include "ir_dynamic_config.h"
+#endif
 #include "input-poller.h"
+#ifdef CONFIG_MP_QOS
+#include "mdrv_qos.h"
+#endif
+
+#ifdef CONFIG_MP_CPUQOS
+#include "mdrv_cpuqos_drv.h"
+#endif
+
+#if defined(CONFIG_ARM_MTKTV_CPUFREQ)
+#include "mtktv-cpufreq.h"
+#endif
+
+#define CUSTOM_POWERKEY_SCANCODE   0x46
+#define INPUTID_VENDOR         0x3697UL
+#define INPUTID_PRODUCT         0x0002
 
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@suse.cz>");
 MODULE_DESCRIPTION("Input core");
@@ -36,7 +59,387 @@ static DEFINE_IDA(input_ida);
 
 static LIST_HEAD(input_dev_list);
 static LIST_HEAD(input_handler_list);
+#define BTN_NETFLIX_KEY_NUM             20
+int btn_arr[BTN_NETFLIX_KEY_NUM] = {0};
+int btn_num = 0;
+#ifdef CONFIG_MSTAR_CHIP
 
+extern int mstar_cust_pwrkey_handler(unsigned int key_code);
+
+#define BT_RC_NTS_WAKEUP    1
+#define IR_BOOST_DEBUG KERN_DEBUG
+
+#if defined(CONFIG_EVDEV_MISC) || defined(CONFIG_EVDEV_MISC_MODULE)
+#define EVDEV_MISC_DEBUG
+#ifdef EVDEV_MISC_DEBUG
+#define evdev_misc_debug(fmt, args...) printk("[%s] " fmt, __FUNCTION__, ##args)
+#else
+#define evdev_misc_debug(fmt, args...) do {} while(0)
+#endif
+
+LIST_HEAD(block_keyList);
+EXPORT_SYMBOL(block_keyList);
+
+unsigned long invert_blk_key;
+EXPORT_SYMBOL(invert_blk_key);
+
+unsigned long en_blk_key;
+EXPORT_SYMBOL(en_blk_key);
+
+LIST_HEAD(key_mapList);
+EXPORT_SYMBOL(key_mapList);
+unsigned long input_event_en = 1;
+unsigned long input_dev_event_enable = 1;
+EXPORT_SYMBOL(input_dev_event_enable);
+
+#if BT_RC_NTS_WAKEUP
+static int __btntskey __attribute__((__aligned__(8)));
+core_param(btntskey, __btntskey, int, 0644);
+extern u32 netflixkey[];
+
+static  int __init parse_btntskey_arr(char *cmdline)
+{
+	char *token,*str;
+	long btn_number;
+	int i = 0;
+	long value = 0;
+	if(!cmdline)
+		return 0;
+	//pr_err("parse_btntskey_arr %s \n",cmdline);
+	str = cmdline;
+	// get first param for arrat size
+	token = strsep(&str, ",");
+	if(token == NULL)
+	{
+		printk(KERN_ERR "Error: invaild data\n");
+		return -EINVAL;
+	}
+	btn_number = simple_strtol(token, NULL, 10);
+	if(btn_number>=20)
+		btn_number = 20;
+	btn_num = btn_number;
+	//pr_err("parse_btntskey_arr btn_number %d \n",btn_number);
+
+	while (i < btn_number && (token = strsep(&str, ",")) != NULL)
+	{
+		if (*token == '\0') continue;
+		if (strncmp(token, "0x", 2) == 0) {
+		value = simple_strtol(token, NULL, 16);
+		//pr_err("value 0x%x\n", value);
+		} else {
+		value = simple_strtol(token, NULL, 10);
+		//pr_err("value %d\n", value);
+		}
+	btn_arr[i] = value;
+	i++;
+	}
+#if 0
+	for(i = 0;i<btn_number;i++)
+	{
+		printk(KERN_ERR "btn_arr[%d] : 0x%x \n",i,btn_arr[i]);
+	}
+#endif
+	return 0;
+}
+early_param("btntskey_arr",parse_btntskey_arr);
+// btntskey_arr = 3,0x75,0x87,0x77,
+
+#endif
+
+#define BLOCK_KEY_RELEASE_UP 1
+
+#if BLOCK_KEY_RELEASE_UP
+static void _do_block_key_check(struct timer_list *data);
+static void block_key_release(void);
+
+// maximum key slots in table
+#define MAX_KEY_PRESS   128
+// check time interval in ms when key press down
+#define BLOCK_KEY_RELEASE_CHECK_TIME 300
+
+static unsigned int _key_pressed[MAX_KEY_PRESS];
+static int _key_pressed_idx;
+static DEFINE_TIMER(block_key_timer, _do_block_key_check);
+static int _flag_block_key_press = 0;
+
+static void _do_block_key_check(struct timer_list *data)
+{
+	if (en_blk_key == 1) {
+        //pr_info("%s: block_key_release.\n", __func__);
+		block_key_release();
+	};
+
+	if (_key_pressed_idx){
+		mod_timer(&block_key_timer, jiffies+msecs_to_jiffies(BLOCK_KEY_RELEASE_CHECK_TIME));
+        //pr_info("%s: mod_timer.\n", __func__);
+    }
+}
+
+static void block_key_release(void)
+{
+	extern struct input_dev *ms_ir_dev;
+	int i;
+	int updated = 0;
+	struct  list_head *pos, *q;
+
+	if (en_blk_key != 1)
+		return;
+
+	_flag_block_key_press = 1;
+	for (i = 0; i < _key_pressed_idx; i++)
+	{
+		bool get_block_key=false;
+		list_for_each_safe(pos, q, &block_keyList) {
+			struct block_key *blkey = NULL;
+			blkey = list_entry(pos, struct block_key, list);
+			if (blkey->keycode == (_key_pressed[i]&0xffff)) {
+				get_block_key = true;
+				break;
+			}
+		}
+		if (invert_blk_key)
+			get_block_key = !get_block_key;
+
+		if (get_block_key) {
+			int j;
+			updated = 1;
+			pr_info("[%s:%d] release key 0x%02X\n", __func__, __LINE__, _key_pressed[i]);
+			en_blk_key = 0;
+			input_report_key(ms_ir_dev, _key_pressed[i], 0);
+			input_sync(ms_ir_dev);
+			en_blk_key = 1;
+			for (j=i+1; j<_key_pressed_idx; j++)
+				_key_pressed[j-1] = _key_pressed[j];
+			_key_pressed_idx --;
+			i--;
+		}
+	}
+	if (updated) {
+		en_blk_key = 0;
+		input_sync(ms_ir_dev);
+		en_blk_key = 1;
+	}
+	_flag_block_key_press = 0;
+}
+
+#if 0
+static void dump_block_key_pressed(void)
+{
+	static char buf[256];
+	int i;
+	int len = 0;
+
+	buf[0] = 0;
+	for (i = 0; i < _key_pressed_idx; i++)
+	{
+		len += snprintf(buf+len, 256-len, " %02X", _key_pressed[i]);
+	}
+	pr_err("BK:%d len=%d, _key_pressed = [%s]\n", __LINE__, _key_pressed_idx, buf);
+}
+#endif
+
+static void block_key_press_update(unsigned int code, int value)
+{
+	int i;
+
+	if (_flag_block_key_press){
+        //pr_info("%s: _flag_block_key_press is 1.\n", __func__);
+		return;
+    }
+	// value = 0: release
+	// value = 1: press
+	// value = 2: repeat
+	if (!(value == 0 || value == 1))
+		return;
+
+	// find key code
+	for (i = 0; i < _key_pressed_idx; i++) {
+		if (code == _key_pressed[i])
+			break;
+	}
+
+	// add key if key press down and the key is not in array
+	if (value == 1 && i == _key_pressed_idx && i < MAX_KEY_PRESS) {
+		_key_pressed[_key_pressed_idx++] = code;
+        //pr_info("%s: add key 0x%x in array.\n", __func__, code);
+	}
+
+	// remove key if key release up and the key is in array
+	if (value == 0 && i != _key_pressed_idx) {
+		for (; i < _key_pressed_idx-1; i++){
+			_key_pressed[i] = _key_pressed[i+1];
+        }
+		--_key_pressed_idx;
+        //pr_info("%s: del key 0x%x in array.\n", __func__, code);
+	}
+	if (_key_pressed_idx) {
+		mod_timer(&block_key_timer, jiffies +
+				msecs_to_jiffies(BLOCK_KEY_RELEASE_CHECK_TIME));
+		//pr_info("%s: mod_timer.\n", __func__);
+	} else {
+		del_timer_sync(&block_key_timer);
+        //pr_info("%s: del_timer_sync.\n", __func__);
+	}
+}
+#endif
+
+int input_event_enable(unsigned int value)
+{
+	if (value == 1) {
+		input_event_en = 1;
+		return 1;
+	}
+
+	input_event_en = 0;
+	return 0;
+}
+EXPORT_SYMBOL(input_event_enable);
+
+int add_key(unsigned long scancode,unsigned long keycode)
+{
+	struct block_key * pblock_key;
+	struct list_head *pos, *q;
+	bool find_key = false;
+
+	evdev_misc_debug("Sysfs - Write!!!\n");
+	evdev_misc_debug("store scancode: 0x%02lx ,keycode: 0x%02lx \n",scancode,keycode);
+	pblock_key = kmalloc(sizeof(*pblock_key), GFP_KERNEL);
+	if (!pblock_key) {
+		// TODO: handle error
+		pr_err("%s: pblock_key kmalloc failed!\n", __func__);
+		return -ENOMEM;
+	}
+
+	strcpy(pblock_key->name, "key_block_list");
+
+	list_for_each_safe(pos, q, &block_keyList) {
+		struct block_key *blkey = NULL;
+		blkey = list_entry(pos, struct block_key, list);
+		evdev_misc_debug("blkey->scancode: 0x%02x,blkey->keycode: 0x%02x  \n",
+					blkey->scancode,blkey->keycode);
+		//sprintf(buf, "%s0x%02x 0x%02x\n", buf, blkey->scancode,blkey->keycode);
+		if (blkey->scancode == scancode && blkey->keycode == keycode) {
+			find_key=true;
+			evdev_misc_debug("key already in list: blkey->scancode:"
+					" 0x%02x,blkey->keycode: 0x%02x  \n",
+					blkey->scancode,blkey->keycode);
+			list_del_init(&blkey->list);
+			kfree(blkey);
+			break;
+		} else {
+			find_key=false;
+		}
+	}
+
+	if (!find_key) {
+		pblock_key->scancode = scancode;
+		pblock_key->keycode = keycode;
+		list_add_tail(&pblock_key->list, &block_keyList);
+		return 1;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(add_key);
+
+int soft_trigger_event(unsigned long scancode,unsigned long keycode)
+{
+	extern struct input_dev *ms_ir_dev;
+
+	if(keycode != KEY_PAGEUP) {
+#ifdef CONFIG_IR_DYNAMIC_CONFIG
+		keycode = get_ir_keycode(scancode);
+		evdev_misc_debug("Get keycode from IR map, scancode:%lu, keycode:%lu\n", scancode, keycode);
+		if (keycode == KEY_RESERVED) {
+			pr_err("Could not find correct wakeup keycode, use KEY_POWER as default key\n");
+			keycode = KEY_POWER;
+		}
+#endif
+	}
+	pr_info("%s:Send key, scancode %u, keycode %u.\n", __func__,  scancode, keycode);
+	input_event(ms_ir_dev, EV_MSC, MSC_SCAN, scancode);
+	input_report_key(ms_ir_dev, keycode, 1);
+	input_sync(ms_ir_dev);
+	input_report_key(ms_ir_dev, keycode, 0);
+	input_sync(ms_ir_dev);
+
+	return 1;
+}
+EXPORT_SYMBOL(soft_trigger_event);
+
+int do_block(unsigned int value,int blk_msc,int blk_key)
+{
+	bool get_block_key=false;
+	struct list_head *pos, *q;
+
+	if (en_blk_key != 1)
+		return 0;
+
+	if (blk_msc == 1) {
+		list_for_each_safe(pos, q, &block_keyList) {
+			struct block_key *blkey = NULL;
+			blkey = list_entry(pos, struct block_key, list);
+			evdev_misc_debug("pblock_key: 0x%02x, value&0xff: 0x%02x \n",
+				blkey->scancode,value&0xff);
+			if (blkey->scancode == (value & 0xff))
+				get_block_key = true;
+		}
+		if (invert_blk_key == 0x1)
+			if (get_block_key == true)
+				return 0;
+			else
+				return 1;
+		else
+			if(get_block_key==true)
+				return 1;
+			else
+				return 0;
+	} else if(blk_key == 1) {
+		list_for_each_safe(pos, q, &block_keyList) {
+			struct block_key *blkey = NULL;
+			blkey = list_entry(pos, struct block_key, list);
+			evdev_misc_debug("pblock_key: 0x%02x, value&0xffff: 0x%02x \n",
+				blkey->keycode,value&0xffff);
+			if (blkey->keycode == (value & 0xffff))
+				get_block_key = true;
+		}
+		if (invert_blk_key == 0x1)
+			if (get_block_key == true)
+				return 0;
+			else
+				return 1;
+			else
+			if (get_block_key == true)
+				return 1;
+			else
+				return 0;
+	}
+
+	return 0;
+}
+
+unsigned int do_switch_key(unsigned int code)
+{
+	int i = 0, j;
+	unsigned int keycode;
+	struct list_head *pos, *q;
+
+	list_for_each_safe(pos, q, &key_mapList) {
+		struct ir_key_map *swkey = NULL;
+		swkey = list_entry(pos, struct ir_key_map, list);
+		evdev_misc_debug("swkey->scancode: 0x%02x,swkey->keycode: 0x%02x,swkey->keycode_new: 0x%02x\n",
+				swkey->scancode, swkey->keycode, swkey->keycode_new);
+		if (swkey->keycode == code) {
+			evdev_misc_debug("find swkey->keycode: 0x%02x,swkey->keycode_new: 0x%02x\n",
+				swkey->keycode, swkey->keycode_new);
+			return swkey->keycode_new;
+		}
+	}
+	return code;
+}
+#endif
+
+#endif
 /*
  * input_mutex protects access to both input_dev_list and input_handler_list.
  * This also causes input_[un]register_device and input_[un]register_handler
@@ -61,7 +464,11 @@ static const unsigned int input_max_code[EV_CNT] = {
 static inline int is_event_supported(unsigned int code,
 				     unsigned long *bm, unsigned int max)
 {
+#ifdef CONFIG_MSTAR_DYNAMIC_IR
+        return code <= max;
+#else
 	return code <= max && test_bit(code, bm);
+#endif
 }
 
 static int input_defuzz_abs_event(int value, int old_val, int fuzz)
@@ -269,11 +676,124 @@ static int input_handle_abs_event(struct input_dev *dev,
 	return INPUT_PASS_TO_HANDLERS;
 }
 
+#ifdef CONFIG_MSTAR_CHIP
+
+#if defined(CONFIG_MSTAR_DVFS) || defined(CONFIG_ARM_MTKTV_CPUFREQ)
+#define MP_INPUT_DVFS
+#endif
+
+#ifdef CONFIG_MSTAR_DVFS
+#include "chip_dvfs_calibrating.h"
+#include "mdrv_dvfs.h"
+#endif
+
+// the cpu freq in khz for ir boost
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+atomic_t ir_boost_cpu_freq[CONFIG_NR_CPUS];
+#elif defined(CONFIG_MSTAR_CPU_calibrating)
+atomic_t ir_boost_cpu_freq = ATOMIC_INIT(0);
+#endif
+
+
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING) || defined(CONFIG_MSTAR_CPU_calibrating)
+int _CPU_calibrating_proc_write(unsigned long, unsigned long, int);
+#endif
+
+#ifdef MP_INPUT_DVFS
+int read_ir_boost_cpu_freq(int);
+void write_ir_boost_cpu_freq(int, int);
+
+// the duration in ms of overclocking for ir boost
+atomic_t ir_boost_duration = ATOMIC_INIT(1000);
+int read_ir_boost_duration(void);
+void write_ir_boost_duration(int);
+
+static void ir_boost_start(struct work_struct*);
+static void ir_boost_stop(struct work_struct*);
+static struct work_struct ir_boost_start_work;
+static struct delayed_work ir_boost_stop_work;
+static DECLARE_WORK(ir_boost_start_work, ir_boost_start);
+static DECLARE_DELAYED_WORK(ir_boost_stop_work, ir_boost_stop);
+
+#define IR_BOOST_CLIENT_ID 192
+
+static void ir_boost_start(struct work_struct *w)
+{
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	int i;
+	pr_info("[ir_boost] starts\n");
+	for_each_online_cpu(i) {
+		if (i < CONFIG_NR_CPUS)
+			_CPU_calibrating_proc_write(IR_BOOST_CLIENT_ID,
+				read_ir_boost_cpu_freq(i), i);
+	}
+#elif defined(CONFIG_MSTAR_CPU_calibrating)
+	pr_info("[ir_boost] starts\n");
+	_CPU_calibrating_proc_write(IR_BOOST_CLIENT_ID, read_ir_boost_cpu_freq(0), 0);
+#else
+	mtktv_boost_register(E_MTKTV_IR_BOOST, 0 ,E_BOOST_ENABLE ,0);
+#endif
+	return;
+}
+
+static void ir_boost_stop(struct work_struct *w)
+{
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	int i;
+	pr_info("[ir_boost] stops\n");
+	for_each_online_cpu(i)
+		_CPU_calibrating_proc_write(IR_BOOST_CLIENT_ID, 0, i);
+#elif defined(CONFIG_MSTAR_CPU_calibrating)
+	pr_info("[ir_boost] stops\n");
+	_CPU_calibrating_proc_write(IR_BOOST_CLIENT_ID, 0, 0);
+#else
+	mtktv_boost_register(E_MTKTV_IR_BOOST, 0 ,E_BOOST_DISABLE ,0);
+#endif
+	return;
+}
+
+bool is_ir_boost_running(void)
+{
+	if (delayed_work_pending(&ir_boost_stop_work))
+		return true;
+
+	return false;
+}
+
+void trigger_ir_boost_event(void)
+{
+	if (read_ir_boost_duration() == 0)
+		return;
+
+	if (is_ir_boost_running() == false) {
+		schedule_work_on(cpumask_first(cpu_online_mask), &ir_boost_start_work);
+	} else {
+		pr_debug("[ir_boost] extend the expiration time\n");
+		cancel_delayed_work(&ir_boost_stop_work);
+	}
+}
+
+void release_ir_boost_event(void)
+{
+	schedule_delayed_work_on(cpumask_first(cpu_online_mask),
+		&ir_boost_stop_work, msecs_to_jiffies(read_ir_boost_duration()));
+}
+
+
+
+EXPORT_SYMBOL(trigger_ir_boost_event);
+EXPORT_SYMBOL(release_ir_boost_event);
+#endif
+
+#endif
+
 static int input_get_disposition(struct input_dev *dev,
 			  unsigned int type, unsigned int code, int *pval)
 {
 	int disposition = INPUT_IGNORE_EVENT;
 	int value = *pval;
+	int i = 0;
+	int btn_key;
 
 	switch (type) {
 
@@ -294,18 +814,66 @@ static int input_get_disposition(struct input_dev *dev,
 
 	case EV_KEY:
 		if (is_event_supported(code, dev->keybit, KEY_MAX)) {
-
+#ifdef CONFIG_MP_QOS
+			struct qos_key_info key_info = {
+				.key_action = value,
+				.key_button = code };
+			qos_event_detect(QOS_BIT_CPU, QOS_EVENT_KEY, (void *)&key_info);
+#endif
 			/* auto-repeat bypasses state updates */
 			if (value == 2) {
 				disposition = INPUT_PASS_TO_HANDLERS;
+#ifdef MP_INPUT_DVFS
+                trigger_ir_boost_event();
+#endif
 				break;
 			}
-
+#ifdef MP_INPUT_DVFS
+			// when a key is depressed, we speed up CPU clock
+			// and set a timer for speeding down CPU clock
+			if (value == 1) {
+			        trigger_ir_boost_event();
+            }
+			else if (value == 0) {
+					release_ir_boost_event();
+            }
+#endif
 			if (!!test_bit(code, dev->key) != !!value) {
 
 				__change_bit(code, dev->key);
 				disposition = INPUT_PASS_TO_HANDLERS;
 			}
+            if(_flag_block_key_press == 1)//for block key release issue.
+            {
+		        disposition = INPUT_PASS_TO_HANDLERS;
+            }
+#ifdef CONFIG_MSTAR_CHIP
+#if defined(CONFIG_EVDEV_MISC) || defined(CONFIG_EVDEV_MISC_MODULE)
+            //evdev_misc_debug("EV_KEY,dev->id.bustype 0x%02x \n",dev->id.bustype);
+    		if(disposition & INPUT_PASS_TO_HANDLERS) {
+    			if (input_event_en==0x1){
+    				/* do not block BT key release(value==0) event */
+    				if((!((dev->id.bustype==BUS_BLUETOOTH)&&(value == 0))) && do_block(code,0,1)){
+    					disposition = INPUT_IGNORE_EVENT;
+    				}
+    				else{
+    					disposition = INPUT_PASS_TO_HANDLERS;
+    				}
+    			}
+    			else
+    				disposition = INPUT_IGNORE_EVENT;
+    		}
+
+            pr_info("%s:EV_KEY code=0x%x value=0x%0x bus=%d en_blk_key=%d disposition=%d\n",
+                __func__, code, value, dev->id.bustype, en_blk_key, disposition);
+
+#if BLOCK_KEY_RELEASE_UP
+			if (disposition & INPUT_PASS_TO_HANDLERS)
+				block_key_press_update(code, value);
+#endif
+
+#endif
+#endif
 		}
 		break;
 
@@ -331,9 +899,51 @@ static int input_get_disposition(struct input_dev *dev,
 		break;
 
 	case EV_MSC:
-		if (is_event_supported(code, dev->mscbit, MSC_MAX))
-			disposition = INPUT_PASS_TO_ALL;
-
+		pr_info("%s:EV_MSC btntskey=0x%x code=0x%x value=0x%0x bus=%d\n",
+			__func__, __btntskey, code, value, dev->id.bustype);
+		if (is_event_supported(code, dev->mscbit, MSC_MAX)) {
+#if (defined(CONFIG_EVDEV_MISC) || defined(CONFIG_EVDEV_MISC_MODULE)) && defined(CONFIG_MSTAR_CHIP)
+            //evdev_misc_debug("EV_MSC,dev->id.bustype 0x%02x \n",dev->id.bustype);
+			if(input_event_en==0x1){
+				if(do_block(code,1,0))
+					disposition = INPUT_IGNORE_EVENT;
+				else
+					disposition = INPUT_PASS_TO_ALL;
+			}else
+				disposition = INPUT_IGNORE_EVENT;
+#else
+				disposition = INPUT_PASS_TO_ALL;
+#endif
+#if defined(CONFIG_MSTAR_CHIP)
+#if BT_RC_NTS_WAKEUP
+			/* Update wakeup reason for BT RC NTS key
+			 * TODO: create a BT RC ini and BT RC wakeup reason driver */
+			if (__btntskey && (disposition & INPUT_PASS_TO_HANDLERS) &&
+					dev->id.bustype == BUS_BLUETOOTH &&
+					(value & 0xffff) == __btntskey) {
+				pr_info("%s: BT NTS key usage matched!(0x%04x, 0x%04x)\n",
+					__func__, code, __btntskey);
+				mstar_cust_pwrkey_handler(netflixkey[0]);
+			}else{
+				for(i = 0;i<btn_num;i++)
+				{
+					if (btn_arr[i]&& (disposition & INPUT_PASS_TO_HANDLERS) &&
+						dev->id.bustype == BUS_BLUETOOTH &&
+						(value & 0xffff) == btn_arr[i]) {
+						pr_info("%s: BT NTS key usage matched!(0x%04x, 0x%04x)\n",
+						    __func__, code, btn_arr[i]);
+						mstar_cust_pwrkey_handler(netflixkey[0]);
+						btn_key = btn_arr[i];
+						break;
+				    }
+				}
+			}
+#endif // BT_RC_NTS_WAKEUP
+#endif
+		}
+		if(dev->id.bustype == BUS_BLUETOOTH)
+			pr_info("%s:EV_MSC btntskey=0x%x code=0x%x value=0x%0x bus=%d en_blk_key=%d disposition=%d\n",
+				__func__, btn_key, code, value, dev->id.bustype, en_blk_key, disposition);
 		break;
 
 	case EV_LED:
@@ -375,6 +985,11 @@ static int input_get_disposition(struct input_dev *dev,
 	return disposition;
 }
 
+#define CUSTOM_POWERKEY_SET  (1L << 31)
+#ifdef CUSTOM_POWERKEY_SET
+extern int mstar_cust_pwrkey_handler(unsigned int keycode);
+#endif
+
 static void input_handle_event(struct input_dev *dev,
 			       unsigned int type, unsigned int code, int value)
 {
@@ -385,6 +1000,11 @@ static void input_handle_event(struct input_dev *dev,
 		return;
 
 	disposition = input_get_disposition(dev, type, code, &value);
+#ifdef CONFIG_MSTAR_CHIP
+#if defined(CONFIG_EVDEV_MISC) || defined(CONFIG_EVDEV_MISC_MODULE)
+	code = do_switch_key(code);
+#endif
+#endif
 	if (disposition != INPUT_IGNORE_EVENT && type != EV_SYN)
 		add_input_randomness(type, code, value);
 
@@ -408,6 +1028,13 @@ static void input_handle_event(struct input_dev *dev,
 		v->type = type;
 		v->code = code;
 		v->value = value;
+#ifdef CUSTOM_POWERKEY_SET
+		// clean wakeup reason if power key is pressed.
+		// for keypad (vid,pid)=(0x3697,0x2)
+		if (dev->id.vendor == INPUTID_VENDOR && dev->id.product == INPUTID_PRODUCT &&
+				(code == CUSTOM_POWERKEY_SCANCODE || code == KEY_POWER))
+			mstar_cust_pwrkey_handler(CUSTOM_POWERKEY_SET);
+#endif
 	}
 
 	if (disposition & INPUT_FLUSH) {
@@ -1302,9 +1929,197 @@ static const struct proc_ops input_handlers_proc_ops = {
 	.proc_release	= seq_release,
 };
 
+#ifdef CONFIG_MSTAR_CHIP
+
+#ifdef MP_INPUT_DVFS
+int read_ir_boost_cpu_freq(int cpu)
+{
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	if (cpu < CONFIG_NR_CPUS)
+		return atomic_read(&ir_boost_cpu_freq[cpu]);
+
+	return 0;
+#elif defined(CONFIG_MSTAR_CPU_calibrating)
+	return atomic_read(&ir_boost_cpu_freq);
+#else
+	pr_warn("not support!\n");
+	return 0;
+#endif
+}
+
+void write_ir_boost_cpu_freq(int value, int cpu)
+{
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	if (cpu < CONFIG_NR_CPUS)
+		atomic_set(&ir_boost_cpu_freq[cpu], value);
+#elif defined(CONFIG_MSTAR_CPU_calibrating)
+	atomic_set(&ir_boost_cpu_freq, value);
+#else
+	pr_warn("not support!\n");
+#endif
+}
+
+static atomic_t proc_ir_boost_cpu_freq_is_open = ATOMIC_INIT(0);
+
+static int proc_ir_boost_cpu_freq_seq_show(struct seq_file *seq, void *v)
+{
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	int i;
+	for (i = 0; i < CONFIG_NR_CPUS; i ++)
+		seq_printf(seq, "%u\n", read_ir_boost_cpu_freq(i));
+#elif defined(CONFIG_MSTAR_CPU_calibrating)
+	seq_printf(seq, "%u\n", read_ir_boost_cpu_freq(0)); // Always read CPU 0
+#endif
+	return 0;
+}
+
+static int proc_ir_boost_cpu_freq_open(struct inode *inode, struct file *file)
+{
+	if (atomic_read(&proc_ir_boost_cpu_freq_is_open))
+		return -EACCES;
+
+	single_open(file, proc_ir_boost_cpu_freq_seq_show, NULL);
+
+	atomic_set(&proc_ir_boost_cpu_freq_is_open, 1);
+	return 0;
+}
+
+static int proc_ir_boost_cpu_freq_release(struct inode *inode, struct file * file)
+{
+	WARN_ON(!atomic_read(&proc_ir_boost_cpu_freq_is_open));
+	atomic_set(&proc_ir_boost_cpu_freq_is_open, 0);
+	return 0;
+}
+
+static ssize_t proc_ir_boost_cpu_freq_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
+{
+	const unsigned int BUFFSIZE = 1024;
+	char buffer[BUFFSIZE];
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	unsigned long cpu_freq_in_khz = 0;
+	unsigned int set_cpu = 0;
+	unsigned int garbage = 0;
+#endif
+
+	if (count >= BUFFSIZE)
+		count = BUFFSIZE - 1;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	if (sscanf(buffer,"%d %lu %d", &set_cpu, &cpu_freq_in_khz, &garbage) == 3) {
+		return -EINVAL;
+	} else if (sscanf(buffer,"%d %lu", &set_cpu, &cpu_freq_in_khz) == 2) {
+		if (set_cpu > CONFIG_NR_CPUS)
+			return -EINVAL;
+
+		write_ir_boost_cpu_freq(cpu_freq_in_khz, set_cpu);
+	} else {
+		for (set_cpu = 0; set_cpu < CONFIG_NR_CPUS; set_cpu ++)
+			write_ir_boost_cpu_freq(simple_strtol(buffer, NULL, 10), set_cpu);
+	}
+#elif defined(CONFIG_MSTAR_CPU_calibrating)
+	//ir_boost_cpu_freq = simple_strtol(buffer, NULL, 10);
+	write_ir_boost_cpu_freq(simple_strtol(buffer, NULL, 10), 0); //Always write CPU 0
+#endif
+
+	return count;
+}
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
+static const struct proc_ops  proc_ir_boost_cpu_freq_fileops = {
+	.proc_open		= proc_ir_boost_cpu_freq_open,
+	.proc_write		= proc_ir_boost_cpu_freq_write,
+	.proc_read		= seq_read,
+	.proc_lseek		= seq_lseek,
+	.proc_release	= proc_ir_boost_cpu_freq_release,
+};
+#else
+static const struct file_operations proc_ir_boost_cpu_freq_fileops = {
+	.open		= proc_ir_boost_cpu_freq_open,
+	.write		= proc_ir_boost_cpu_freq_write,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= proc_ir_boost_cpu_freq_release,
+};
+#endif
+static atomic_t proc_ir_boost_duration_is_open = ATOMIC_INIT(0);
+
+int read_ir_boost_duration(void)
+{
+	return atomic_read(&ir_boost_duration);
+}
+
+void write_ir_boost_duration(int value)
+{
+	atomic_set(&ir_boost_duration, value);
+}
+
+static int proc_ir_boost_duration_seq_show(struct seq_file *seq, void *v)
+{
+	seq_printf(seq, "%u\n", read_ir_boost_duration());
+	return 0;
+}
+
+static int proc_ir_boost_duration_open(struct inode *inode, struct file *file)
+{
+	if (atomic_read(&proc_ir_boost_duration_is_open))
+		return -EACCES;
+
+	single_open(file, proc_ir_boost_duration_seq_show, NULL);
+
+	atomic_set(&proc_ir_boost_duration_is_open, 1);
+	return 0;
+}
+
+static int proc_ir_boost_duration_release(struct inode *inode, struct file * file)
+{
+	WARN_ON(!atomic_read(&proc_ir_boost_duration_is_open));
+	atomic_set(&proc_ir_boost_duration_is_open, 0);
+	return 0;
+}
+
+static ssize_t proc_ir_boost_duration_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
+{
+	const unsigned int BUFFSIZE = 1024;
+	char buffer[BUFFSIZE];
+
+	if (count >= BUFFSIZE)
+		count = BUFFSIZE - 1;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	write_ir_boost_duration(simple_strtol(buffer, NULL, 10));
+
+	return count;
+}
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
+static const struct proc_ops proc_ir_boost_duration_fileops = {
+	.proc_open		= proc_ir_boost_duration_open,
+	.proc_write		= proc_ir_boost_duration_write,
+	.proc_read		= seq_read,
+	.proc_lseek		= seq_lseek,
+	.proc_release	= proc_ir_boost_duration_release,
+};
+#else
+static const struct file_operations proc_ir_boost_duration_fileops = {
+	.owner		= THIS_MODULE,
+	.open		= proc_ir_boost_duration_open,
+	.write		= proc_ir_boost_duration_write,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= proc_ir_boost_duration_release,
+};
+#endif
+#endif
+
+#endif
+
 static int __init input_proc_init(void)
 {
 	struct proc_dir_entry *entry;
+	int i;
 
 	proc_bus_input_dir = proc_mkdir("bus/input", NULL);
 	if (!proc_bus_input_dir)
@@ -1319,8 +2134,33 @@ static int __init input_proc_init(void)
 			    &input_handlers_proc_ops);
 	if (!entry)
 		goto fail2;
+#ifdef CONFIG_MSTAR_CHIP
+#ifdef MP_INPUT_DVFS
+	entry = proc_create("ir_boost_duration", 0, proc_bus_input_dir,
+			    &proc_ir_boost_duration_fileops);
+	if (!entry)
+		goto fail3;
+
+	entry = proc_create("ir_boost_cpu_freq", 0, proc_bus_input_dir,
+			    &proc_ir_boost_cpu_freq_fileops);
+	if (!entry)
+		goto fail4;
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+	for (i = 0; i < CONFIG_NR_CPUS; i ++) {
+		atomic_set(&ir_boost_cpu_freq[i], 0);
+		write_ir_boost_cpu_freq(MDrvDvfsQueryCpuClock(CONFIG_DVFS_IR_BOOTS_CPU_CLOCK, i), i);
+	}
+#elif defined(CONFIG_MSTAR_CPU_calibrating)
+	write_ir_boost_cpu_freq(MAX_CPU_FREQ, 0); //Always write CPU 0
+#endif
+#endif
 
 	return 0;
+#ifdef MP_INPUT_DVFS
+ fail4:	remove_proc_entry("ir_boost_duration", proc_bus_input_dir);
+ fail3:	remove_proc_entry("handlers", proc_bus_input_dir);
+#endif
+#endif
 
  fail2:	remove_proc_entry("devices", proc_bus_input_dir);
  fail1: remove_proc_entry("bus/input", NULL);

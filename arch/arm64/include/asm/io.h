@@ -167,9 +167,17 @@ extern void __iomem *__ioremap(phys_addr_t phys_addr, size_t size, pgprot_t prot
 extern void iounmap(volatile void __iomem *addr);
 extern void __iomem *ioremap_cache(phys_addr_t phys_addr, size_t size);
 
-#define ioremap(addr, size)		__ioremap((addr), (size), __pgprot(PROT_DEVICE_nGnRE))
+#ifdef CONFIG_MP_PLATFORM_ARM
+#define ioremap(addr, size)            __ioremap((addr), (size), __pgprot(PROT_DEVICE_nGnRnE))
+#else
+#define ioremap(addr, size)           __ioremap((addr), (size), __pgprot(PROT_DEVICE_nGnRE))
+#endif
+#define ioremap_nocache(addr, size)	__ioremap((addr), (size), __pgprot(PROT_DEVICE_nGnRE))
 #define ioremap_wc(addr, size)		__ioremap((addr), (size), __pgprot(PROT_NORMAL_NC))
 #define ioremap_np(addr, size)		__ioremap((addr), (size), __pgprot(PROT_DEVICE_nGnRnE))
+#ifdef CONFIG_MP_PLATFORM_ARM
+#define ioremap_cached(addr, size)      __ioremap((addr), (size), __pgprot(PROT_NORMAL))
+#endif
 
 /*
  * io{read,write}{16,32,64}be() macros

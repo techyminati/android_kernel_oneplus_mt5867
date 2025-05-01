@@ -958,7 +958,7 @@ static void __init __create_mapping(struct mm_struct *mm, struct map_desc *md,
  * offsets, and we take full advantage of sections and
  * supersections.
  */
-static void __init create_mapping(struct map_desc *md)
+void __init create_mapping(struct map_desc *md)
 {
 	if (md->virtual != vectors_base() && md->virtual < TASK_SIZE) {
 		pr_warn("BUG: not creating mapping for 0x%08llx at 0x%08lx in user region\n",
@@ -994,6 +994,8 @@ void __init create_mapping_late(struct mm_struct *mm, struct map_desc *md,
 	__create_mapping(mm, md, late_alloc, ng);
 }
 
+struct static_vm svm_body;
+
 /*
  * Create the architecture specific mappings
  */
@@ -1001,13 +1003,12 @@ void __init iotable_init(struct map_desc *io_desc, int nr)
 {
 	struct map_desc *md;
 	struct vm_struct *vm;
-	struct static_vm *svm;
+	struct static_vm *svm; //= &svm_body;
 
 	if (!nr)
 		return;
-
 	svm = memblock_alloc(sizeof(*svm) * nr, __alignof__(*svm));
-	if (!svm)
+    if (!svm)
 		panic("%s: Failed to allocate %zu bytes align=0x%zx\n",
 		      __func__, sizeof(*svm) * nr, __alignof__(*svm));
 
@@ -1139,7 +1140,8 @@ void __init debug_ll_io_init(void)
 	iotable_init(&map, 1);
 }
 #endif
-
+static void * __initdata vmalloc_min =
+	(void *)(VMALLOC_END - (240 << 20) - VMALLOC_OFFSET);
 static unsigned long __initdata vmalloc_size = 240 * SZ_1M;
 
 /*
@@ -1166,6 +1168,7 @@ static int __init early_vmalloc(char *arg)
 	}
 
 	vmalloc_size = vmalloc_reserve;
+	vmalloc_min = (void *)(VMALLOC_END - vmalloc_reserve - VMALLOC_OFFSET);
 	return 0;
 }
 early_param("vmalloc", early_vmalloc);
@@ -1185,8 +1188,12 @@ void __init adjust_lowmem_bounds(void)
 	 * and may itself be outside the valid range for which phys_addr_t
 	 * and therefore __pa() is defined.
 	 */
+//#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+//	vmalloc_limit = (u64)__pa(vmalloc_min - 1) + 1;
+//#else
 	vmalloc_limit = (u64)VMALLOC_END - vmalloc_size - VMALLOC_OFFSET -
 			PAGE_OFFSET + PHYS_OFFSET;
+//#endif
 
 	/*
 	 * The first usable region must be PMD aligned. Mark its start
@@ -1263,7 +1270,6 @@ void __init adjust_lowmem_bounds(void)
 			memblock_remove(memblock_limit, end - memblock_limit);
 		}
 	}
-
 	memblock_set_current_limit(memblock_limit);
 }
 

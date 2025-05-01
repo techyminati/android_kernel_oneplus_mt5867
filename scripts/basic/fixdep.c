@@ -34,7 +34,7 @@
  * the config symbols are rebuilt.
  *
  * So if the user changes his CONFIG_HIS_DRIVER option, only the objects
- * which depend on "include/config/HIS_DRIVER" will be rebuilt,
+ * which depend on "include/config/his/driver.h" will be rebuilt,
  * so most likely only his driver ;-)
  *
  * The idea above dates, by the way, back to Michael E Chastain, AFAIK.
@@ -74,8 +74,13 @@
  *
  * and then basically copies the .<target>.d file to stdout, in the
  * process filtering out the dependency on autoconf.h and adding
- * dependencies on include/config/MY_OPTION for every
+ * dependencies on include/config/my/option.h for every
  * CONFIG_MY_OPTION encountered in any of the prerequisites.
+ *
+ * It will also filter out all the dependencies on *.ver. We need
+ * to make sure that the generated version checksum are globally up
+ * to date before even starting the recursive build, so it's too late
+ * at this point anyway.
  *
  * We don't even try to really parse the header files, but
  * merely grep, i.e. if CONFIG_FOO is mentioned in a comment, it will
@@ -94,41 +99,58 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
-#include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
 
 static void usage(void)
 {
-	fprintf(stderr, "Usage: fixdep <depfile> <target> <cmdline>\n");
+	fprintf(stderr, "Usage: fixdep [-e] <depfile> <target> <cmdline>\n");
+	fprintf(stderr, " -e  insert extra dependencies given on stdin\n");
 	exit(1);
 }
 
 /*
- * In the intended usage of this program, the stdout is redirected to .*.cmd
- * files. The return value of printf() must be checked to catch any error,
- * e.g. "No space left on device".
+ * Print out a dependency path from a symbol name
  */
-static void xprintf(const char *format, ...)
+static void print_dep(const char *m, int slen, const char *dir)
 {
-	va_list ap;
-	int ret;
+	int c, prev_c = '/', i;
 
-	va_start(ap, format);
-	ret = vprintf(format, ap);
-	if (ret < 0) {
-		perror("fixdep");
-		exit(1);
+	printf("    $(wildcard %s/", dir);
+	for (i = 0; i < slen; i++) {
+		c = m[i];
+		if (c == '_')
+			c = '/';
+		else
+			c = tolower(c);
+		if (c != '/' || prev_c != '/')
+			putchar(c);
+		prev_c = c;
 	}
-	va_end(ap);
+	printf(".h) \\\n");
+}
+
+static void do_extra_deps(void)
+{
+	char buf[80];
+
+	while (fgets(buf, sizeof(buf), stdin)) {
+		int len = strlen(buf);
+
+		if (len < 2 || buf[len - 1] != '\n') {
+			fprintf(stderr, "fixdep: bad data on stdin\n");
+			exit(1);
+		}
+		print_dep(buf, len - 1, "include/ksym");
+	}
 }
 
 struct item {
 	struct item	*next;
 	unsigned int	len;
 	unsigned int	hash;
-	char		name[];
+	char		name[0];
 };
 
 #define HASHSZ 256
@@ -188,8 +210,7 @@ static void use_config(const char *m, int slen)
 	    return;
 
 	define_config(m, slen, hash);
-	/* Print out a dependency path from a symbol name. */
-	xprintf("    $(wildcard include/config/%.*s) \\\n", slen, m);
+	print_dep(m, slen, "include/config");
 }
 
 /* test if s ends in sub */
@@ -215,7 +236,7 @@ static void parse_config_file(const char *p)
 		}
 		p += 7;
 		q = p;
-		while (isalnum(*q) || *q == '_')
+		while (*q && (isalnum(*q) || *q == '_'))
 			q++;
 		if (str_ends_with(p, q - p, "_MODULE"))
 			r = q - 7;
@@ -263,7 +284,8 @@ static void *read_file(const char *filename)
 static int is_ignored_file(const char *s, int len)
 {
 	return str_ends_with(s, len, "include/generated/autoconf.h") ||
-	       str_ends_with(s, len, "include/generated/autoksyms.h");
+	       str_ends_with(s, len, "include/generated/autoksyms.h") ||
+	       str_ends_with(s, len, ".ver");
 }
 
 /*
@@ -271,7 +293,7 @@ static int is_ignored_file(const char *s, int len)
  * assignments are parsed not only by make, but also by the rather simple
  * parser in scripts/mod/sumversion.c.
  */
-static void parse_dep_file(char *m, const char *target)
+static void parse_dep_file(char *m, const char *target, int insert_extra_deps)
 {
 	char *p;
 	int is_last, is_target;
@@ -318,13 +340,13 @@ static void parse_dep_file(char *m, const char *target)
 				 */
 				if (!saw_any_target) {
 					saw_any_target = 1;
-					xprintf("source_%s := %s\n\n",
-						target, m);
-					xprintf("deps_%s := \\\n", target);
+					printf("source_%s := %s\n\n",
+					       target, m);
+					printf("deps_%s := \\\n", target);
 				}
 				is_first_dep = 0;
 			} else {
-				xprintf("  %s \\\n", m);
+				printf("  %s \\\n", m);
 			}
 
 			buf = read_file(m);
@@ -347,26 +369,33 @@ static void parse_dep_file(char *m, const char *target)
 		exit(1);
 	}
 
-	xprintf("\n%s: $(deps_%s)\n\n", target, target);
-	xprintf("$(deps_%s):\n", target);
+	if (insert_extra_deps)
+		do_extra_deps();
+
+	printf("\n%s: $(deps_%s)\n\n", target, target);
+	printf("$(deps_%s):\n", target);
 }
 
 int main(int argc, char *argv[])
 {
 	const char *depfile, *target, *cmdline;
+	int insert_extra_deps = 0;
 	void *buf;
 
-	if (argc != 4)
+	if (argc == 5 && !strcmp(argv[1], "-e")) {
+		insert_extra_deps = 1;
+		argv++;
+	} else if (argc != 4)
 		usage();
 
 	depfile = argv[1];
 	target = argv[2];
 	cmdline = argv[3];
 
-	xprintf("cmd_%s := %s\n\n", target, cmdline);
+	printf("cmd_%s := %s\n\n", target, cmdline);
 
 	buf = read_file(depfile);
-	parse_dep_file(buf, target);
+	parse_dep_file(buf, target, insert_extra_deps);
 	free(buf);
 
 	return 0;

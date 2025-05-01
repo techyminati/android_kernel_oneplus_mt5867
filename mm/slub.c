@@ -3146,7 +3146,6 @@ static __always_inline void *slab_alloc_node(struct kmem_cache *s,
 	unsigned long tid;
 	struct obj_cgroup *objcg = NULL;
 	bool init = false;
-
 	s = slab_pre_alloc_hook(s, &objcg, 1, gfpflags);
 	if (!s)
 		return NULL;

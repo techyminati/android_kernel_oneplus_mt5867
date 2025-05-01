@@ -47,6 +47,11 @@
 #include <asm/byteorder.h>
 #include <uapi/linux/fs.h>
 
+#define HAVE_UNLOCKED_IOCTL 1
+// Mstar mali build code modify
+// If not include the <mstar/mpatch_macro.h> will cause mali build error.
+#include <mstar/mpatch_macro.h>
+
 struct backing_dev_info;
 struct bdi_writeback;
 struct bio;
@@ -990,6 +995,9 @@ struct file {
 		struct rcu_head 	fu_rcuhead;
 	} f_u;
 	struct path		f_path;
+#if defined(MP_DEBUG_TOOL_OPROFILE) && (MP_DEBUG_TOOL_OPROFILE == 1)
+#define f_dentry	f_path.dentry
+#endif /*MP_DEBUG_TOOL_OPROFILE*/
 	struct inode		*f_inode;	/* cached value */
 	const struct file_operations	*f_op;
 
@@ -2794,6 +2802,10 @@ extern long do_sys_open(int dfd, const char __user *filename, int flags,
 extern struct file *file_open_name(struct filename *, int, umode_t);
 extern struct file *filp_open(const char *, int, umode_t);
 extern struct file *filp_open_block(const char *, int, umode_t);
+#ifdef  CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL
+extern int file_ioctl(struct file *filp, unsigned int cmd,
+         	int __user *p);
+#endif
 extern struct file *file_open_root(const struct path *,
 				   const char *, int, umode_t);
 static inline struct file *file_open_root_mnt(struct vfsmount *mnt,
@@ -3230,6 +3242,9 @@ static inline bool is_zero_ino(ino_t ino)
 }
 
 extern void __iget(struct inode * inode);
+#if (MP_NTFS3G_WRAP==1)
+extern void __iget_wrap(struct inode * inode);      //AlanYu 20111121 : wrap for __iget()
+#endif
 extern void iget_failed(struct inode *);
 extern void clear_inode(struct inode *);
 extern void __destroy_inode(struct inode *);
@@ -3497,8 +3512,15 @@ extern int buffer_migrate_page(struct address_space *,
 extern int buffer_migrate_page_norefs(struct address_space *,
 				struct page *, struct page *,
 				enum migrate_mode);
+#ifdef CONFIG_MP_CMA_PATCH_MIGRATION_FILTER
+extern int ext4_jnl_migrate_page(struct address_space *mapping,
+	struct page *newpage, struct page *page, enum migrate_mode mode);
+#endif
 #else
 #define buffer_migrate_page NULL
+#ifdef CONFIG_MP_CMA_PATCH_MIGRATION_FILTER
+#define ext4_jnl_migrate_page NULL
+#endif
 #define buffer_migrate_page_norefs NULL
 #endif
 

@@ -10,6 +10,17 @@ static inline void device_pm_init_common(struct device *dev)
 	}
 }
 
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+#define STENT_RESUME_FROM_SUSPEND   3
+extern void set_state_value(int value);
+extern int get_state_value(void);
+extern void set_state_entering(void);
+extern int get_state_entering(void);
+extern void clear_state_entering(void);
+extern int is_mstar_str(void);
+extern int is_wakelock_ignored(void);
+#endif
+
 #ifdef CONFIG_PM
 
 static inline void pm_runtime_early_init(struct device *dev)
@@ -137,6 +148,17 @@ static inline void device_pm_sleep_init(struct device *dev) {}
 
 static inline void device_pm_add(struct device *dev) {}
 
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+#define STENT_RESUME_FROM_SUSPEND   3
+extern void set_state_value(int value);
+extern int get_state_value(void);
+extern void set_state_entering(void);
+extern int get_state_entering(void);
+extern void clear_state_entering(void);
+extern int is_mstar_str(void);
+extern int is_wakelock_ignored(void);
+#endif
+
 static inline void device_pm_remove(struct device *dev)
 {
 	pm_runtime_remove(dev);
@@ -168,3 +190,21 @@ static inline void device_pm_init(struct device *dev)
 	device_pm_sleep_init(dev);
 	pm_runtime_init(dev);
 }
+
+#ifdef CONFIG_PM_SLEEP
+
+/* drivers/base/power/wakeup_stats.c */
+extern int wakeup_source_sysfs_add(struct device *parent,
+				   struct wakeup_source *ws);
+extern void wakeup_source_sysfs_remove(struct wakeup_source *ws);
+
+extern int pm_wakeup_source_sysfs_add(struct device *parent);
+
+#else /* !CONFIG_PM_SLEEP */
+
+static inline int pm_wakeup_source_sysfs_add(struct device *parent)
+{
+	return 0;
+}
+
+#endif /* CONFIG_PM_SLEEP */

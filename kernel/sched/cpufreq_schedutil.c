@@ -15,6 +15,11 @@
 #include <trace/hooks/sched.h>
 
 #define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 8)
+#if defined(CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND) || defined(CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE) || defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL)
+#if defined(CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING)
+extern atomic_t disable_dvfs_reboot;
+#endif
+#endif
 
 struct sugov_tunables {
 	struct gov_attr_set	attr_set;
@@ -101,10 +106,31 @@ static bool sugov_should_update_freq(struct sugov_policy *sg_policy, u64 time)
 	return delta_ns >= sg_policy->freq_update_delay_ns;
 }
 
+static bool sugov_up_down_rate_limit(struct sugov_policy *sg_policy, u64 time,
+				     unsigned int next_freq)
+{
+	s64 delta_ns;
+
+	delta_ns = time - sg_policy->last_freq_update_time;
+
+	if (next_freq > sg_policy->next_freq &&
+	    delta_ns < sg_policy->up_rate_delay_ns)
+			return true;
+
+	if (next_freq < sg_policy->next_freq &&
+	    delta_ns < sg_policy->down_rate_delay_ns)
+			return true;
+
+	return false;
+}
+
 static bool sugov_update_next_freq(struct sugov_policy *sg_policy, u64 time,
 				   unsigned int next_freq)
 {
 	bool should_update = true;
+#ifdef CONFIG_MSTAR_CPU_CLUSTER_CALIBRATING
+	sg_policy->next_freq = sg_policy->policy->cur;
+#endif
 
 	if (sg_policy->need_freq_update)
 		sg_policy->need_freq_update = cpufreq_driver_test_flags(CPUFREQ_NEED_UPDATE_LIMITS);

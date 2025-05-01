@@ -98,6 +98,10 @@ ENTRY(stext)
  THUMB(	.thumb			)	@ switch to Thumb now.
  THUMB(1:			)
 
+#ifdef CONFIG_MSTAR_ARM_BD_FPGA
+        ldr   r1, =~0
+#endif
+
 #ifdef CONFIG_ARM_VIRT_EXT
 	bl	__hyp_stub_install
 #endif

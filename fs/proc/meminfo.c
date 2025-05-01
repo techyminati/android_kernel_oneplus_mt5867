@@ -18,7 +18,11 @@
 #endif
 #include <asm/page.h>
 #include "internal.h"
-#include <trace/hooks/mm.h>
+
+#ifdef CONFIG_MP_ION_PATCH_MSTAR
+extern void get_cma_status(struct seq_file *m);
+#endif
+
 void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
 {
 }
@@ -147,7 +151,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	show_val_kb(m, "CmaFree:        ",
 		    global_zone_page_state(NR_FREE_CMA_PAGES));
 #endif
-	trace_android_vh_meminfo_proc_show(m);
+	//trace_android_vh_meminfo_proc_show(m);
 
 	hugetlb_report_meminfo(m);
 
@@ -155,10 +159,33 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 
 	return 0;
 }
+#ifdef CONFIG_MP_ION_PATCH_MSTAR
+static int cmainfo_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "CMA heap info(name,alloc,in cache,fail,total free): \n");
+	get_cma_status(m);
 
+	return 0;
+}
+
+static int cmainfo_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, cmainfo_proc_show, NULL);
+}
+
+const struct proc_ops cmainfo_proc_fops = {
+	.proc_open		= cmainfo_proc_open,
+	.proc_read		= seq_read,
+	.proc_lseek		= seq_lseek,
+	.proc_release	= single_release,
+};
+#endif
 static int __init proc_meminfo_init(void)
 {
 	proc_create_single("meminfo", 0, NULL, meminfo_proc_show);
+#ifdef CONFIG_MP_ION_PATCH_MSTAR
+	proc_create("cmainfo", 0, NULL, &cmainfo_proc_fops);
+#endif
 	return 0;
 }
 fs_initcall(proc_meminfo_init);

@@ -1,0 +1,7 @@
+/dts-v1/;
+/plugin/;
+/include/ "overlay_avb_SysAsRoot.dtsi"
+&mmc_host_sdio {
+wp-option =<0>,<0>,<0>,<0>;
+pc-option = <0>,<0>,<0>,<0>;
+};

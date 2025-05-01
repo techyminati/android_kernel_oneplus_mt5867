@@ -58,6 +58,7 @@ obj-y				+= char/
 
 # iommu/ comes before gpu as gpu are using iommu controllers
 obj-y				+= iommu/
+obj-y				+= mtk-memory/
 
 # gpu/ comes after char for AGP vs DRM startup and after iommu
 obj-y				+= gpu/
@@ -163,6 +164,7 @@ obj-$(subst m,y,$(CONFIG_HYPERV))	+= hv/
 
 obj-$(CONFIG_PM_DEVFREQ)	+= devfreq/
 obj-$(CONFIG_EXTCON)		+= extcon/
+obj-$(CONFIG_SWITCH)		+= switch/
 obj-$(CONFIG_MEMORY)		+= memory/
 obj-$(CONFIG_IIO)		+= iio/
 obj-$(CONFIG_VME_BUS)		+= vme/
@@ -185,6 +187,17 @@ obj-$(CONFIG_MULTIPLEXER)	+= mux/
 obj-$(CONFIG_UNISYS_VISORBUS)	+= visorbus/
 obj-$(CONFIG_SIOX)		+= siox/
 obj-$(CONFIG_GNSS)		+= gnss/
-obj-$(CONFIG_INTERCONNECT)	+= interconnect/
-obj-$(CONFIG_COUNTER)		+= counter/
-obj-$(CONFIG_MOST)		+= most/
+obj-$(CONFIG_INTERCONNECT)     += interconnect/
+obj-$(CONFIG_COUNTER)          += counter/
+obj-$(CONFIG_MOST)             += most/
+
+
+# Add for Mstar chip
+obj-$(CONFIG_MSTAR_CHIP)        += mstar2/
+
+ifneq ($(CONFIG_GATOR),)
+obj-$(CONFIG_GATOR)		+= gator/
+endif
+obj-$(CONFIG_SMAF)		+= smaf/
+obj-y		+= sw_sync/
+obj-y				+= mtk_misc/

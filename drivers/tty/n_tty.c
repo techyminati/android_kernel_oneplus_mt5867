@@ -50,6 +50,7 @@
 #include <linux/ratelimit.h>
 #include <linux/vmalloc.h>
 #include "tty.h"
+#include <mstar/mpatch_macro.h>
 
 /*
  * Until this number of characters is queued in the xmit buffer, select will
@@ -1635,6 +1636,13 @@ n_tty_receive_buf_common(struct tty_struct *tty, const unsigned char *cp,
 	int room, n, rcvd = 0, overflow;
 
 	down_read(&tty->termios_rwsem);
+
+#ifdef CONFIG_MSTAR_CHIP
+	if (!ldata || !tty->driver_data) {
+		up_read(&tty->termios_rwsem);
+		return 0;
+	}
+#endif
 
 	do {
 		/*

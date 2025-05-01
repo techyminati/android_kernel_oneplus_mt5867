@@ -100,7 +100,11 @@ tune-$(CONFIG_CPU_V6K)		=-mtune=arm1136j-s
 tune-y := $(tune-y)
 
 ifeq ($(CONFIG_AEABI),y)
+ifeq ($(CONFIG_MSTAR_M3822),y)
+CFLAGS_ABI	:=-mabi=aapcs-linux -mno-thumb-interwork -mfpu=vfpv3-d16
+else
 CFLAGS_ABI	:=-mabi=aapcs-linux -mfpu=vfp
+endif
 else
 CFLAGS_ABI	:=$(call cc-option,-mapcs-32,-mabi=apcs-gnu) $(call cc-option,-mno-thumb-interwork,)
 endif
@@ -220,6 +224,33 @@ machine-$(CONFIG_ARCH_VEXPRESS)		+= vexpress
 machine-$(CONFIG_ARCH_VT8500)		+= vt8500
 machine-$(CONFIG_ARCH_ZYNQ)		+= zynq
 machine-$(CONFIG_PLAT_SPEAR)		+= spear
+# mediatek-dtv chips
+machine-$(CONFIG_MSTAR_M7322)		+= m7322
+machine-$(CONFIG_MSTAR_M7332)           += m7332
+machine-$(CONFIG_MSTAR_M5621)		+= m5621
+machine-$(CONFIG_MSTAR_M7621)		+= m7621
+machine-$(CONFIG_MSTAR_M7622)		+= m7622
+machine-$(CONFIG_MSTAR_M7632)           += m7632
+machine-$(CONFIG_MSTAR_M7642)           += m7642
+machine-$(CONFIG_MSTAR_M7221)		+= m7221
+machine-$(CONFIG_MSTAR_MASERATI)	+= maserati
+machine-$(CONFIG_MSTAR_M3822)		+= m3822
+machine-$(CONFIG_MSTAR_MT5862)           += mt5862
+machine-$(CONFIG_MSTAR_MT5867)          += mt5867
+machine-$(CONFIG_MSTAR_MT5889)		+= mt5889
+machine-$(CONFIG_MSTAR_MT5872)		+= mt5872
+
+KBUILD_CPPFLAGS += -I$(srctree)/drivers/mstar2
+#KBUILD_CPPFLAGS += -I$(srctree)/drivers/mstar2/include
+KBUILD_CPPFLAGS += -I$(srctree)/arch/arm/mach-$(CONFIG_MSTAR_CHIP_NAME)/board/
+KBUILD_CPPFLAGS += -I$(srctree)/arch/arm
+ifeq ($(CONFIG_ONEHAL_ARCH_SUPPORT),y)
+ONEHAL_VERSION= $(subst ",,$(CONFIG_ONEHAL_VERSION))
+ONEHAL_DIR = ver_$(ONEHAL_VERSION)
+KBUILD_CPPFLAGS	+=  -I$(srctree)/drivers/mstar2/hal/$(subst ",,$(CONFIG_MSTAR_CHIP_NAME))/cpu/arm/$(ONEHAL_DIR)
+KBUILD_CPPFLAGS	+=  -I$(srctree)/drivers/mstar2/hal/$(subst ",,$(CONFIG_MSTAR_CHIP_NAME))/miu/$(ONEHAL_DIR)
+KBUILD_CPPFLAGS +=  -I$(srctree)/drivers/mstar2/hal/$(subst ",,$(CONFIG_MSTAR_CHIP_NAME))/gpio/$(ONEHAL_DIR)
+endif
 
 # Platform directory name.  This list is sorted alphanumerically
 # by CONFIG_* macro name.
@@ -227,6 +258,7 @@ plat-$(CONFIG_ARCH_OMAP)	+= omap
 plat-$(CONFIG_PLAT_ORION)	+= orion
 plat-$(CONFIG_PLAT_PXA)		+= pxa
 plat-$(CONFIG_PLAT_VERSATILE)	+= versatile
+plat-$(CONFIG_PLAT_MSTAR)       += mstar
 
 # The byte offset of the kernel image in RAM from the start of RAM.
 TEXT_OFFSET := $(textofs-y)
@@ -247,6 +279,15 @@ platdirs := $(patsubst %,arch/arm/plat-%/,$(sort $(plat-y)))
 ifneq ($(CONFIG_ARCH_MULTIPLATFORM),y)
 ifneq ($(CONFIG_ARM_SINGLE_ARMV7M),y)
 KBUILD_CPPFLAGS += $(patsubst %,-I$(srctree)/%include,$(machdirs) $(platdirs))
+ifneq ($(CONFIG_MSTAR_CHIP),)
+KBUILD_CPPFLAGS += $(patsubst %,-I$(srctree)/%,$(machdirs) $(platdirs))
+endif
+endif
+endif
+
+ifeq ($(CONFIG_MP_MSTAR_STR_BASE),y)
+ifneq ($(wildcard $(MACHINE)/mstar_strmisc_chip.h),)
+KBUILD_CPPFLAGS += -DMSTAR_STRMISC_CHIP
 endif
 endif
 
@@ -295,7 +336,7 @@ archprepare:
 # Convert bzImage to zImage
 bzImage: zImage
 
-BOOT_TARGETS	= zImage Image xipImage bootpImage uImage
+BOOT_TARGETS	= zImage Image xipImage bootpImage uImage uImage-dtb
 INSTALL_TARGETS	= zinstall uinstall install
 
 PHONY += bzImage $(BOOT_TARGETS) $(INSTALL_TARGETS)
@@ -310,6 +351,12 @@ $(BOOT_TARGETS): vmlinux
 $(INSTALL_TARGETS):
 	$(CONFIG_SHELL) $(srctree)/$(boot)/install.sh "$(KERNELRELEASE)" \
 	$(boot)/$(patsubst %install,%Image,$@) System.map "$(INSTALL_PATH)"
+ifeq ($(CONFIG_MSTAR_ARM),y)
+%.dtb %.dtbo %.main_dtb: | scripts
+else
+%.dtb: | scripts
+endif
+	$(Q)$(MAKE) $(build)=$(boot)/dts MACHINE=$(MACHINE) $(boot)/dts/$@
 
 PHONY += vdso_install
 vdso_install:

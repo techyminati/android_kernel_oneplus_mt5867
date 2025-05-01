@@ -192,6 +192,9 @@ static inline void might_fault(void) { }
 
 void do_exit(long error_code) __noreturn;
 void complete_and_exit(struct completion *, long) __noreturn;
+#ifdef CONFIG_MSTAR_CHIP
+#define strict_strtol   kstrtol
+#endif
 
 extern int num_to_str(char *buf, int size,
 		      unsigned long long num, unsigned int width);

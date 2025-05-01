@@ -21,6 +21,9 @@
 #else
 
 #include <asm/glue.h>
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+#include <linux/types.h>
+#endif
 
 /*
  *	User Space Model
@@ -107,6 +110,13 @@
 struct page;
 struct vm_area_struct;
 
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+extern phys_addr_t linux_memory_address,linux_memory_length;
+extern phys_addr_t linux_memory2_address,linux_memory2_length;
+extern phys_addr_t linux_memory3_address,linux_memory3_length;
+extern volatile unsigned int lx_num;
+#endif
+
 struct cpu_user_fns {
 	void (*cpu_clear_user_highpage)(struct page *page, unsigned long vaddr);
 	void (*cpu_copy_user_highpage)(struct page *to, struct page *from,
@@ -155,6 +165,7 @@ typedef struct page *pgtable_t;
 
 #ifdef CONFIG_HAVE_ARCH_PFN_VALID
 extern int pfn_valid(unsigned long);
+int pfn_is_map_memory(unsigned long pfn);
 #endif
 
 #include <asm/memory.h>

@@ -2,6 +2,18 @@
 #
 # Makefile for the kernel mmc core.
 #
+CONFIG_MSTAR_CHIP_NAME := $(subst ",,$(CONFIG_MSTAR_CHIP_NAME))
+
+# compatiblity with mstar
+EXTRA_CFLAGS                += -I$(srctree)/drivers/mstar/mmc/host/eMMCDrv/inc/api/
+EXTRA_CFLAGS                += -I$(srctree)/drivers/mstar/mmc/host/eMMCDrv/inc/common/
+EXTRA_CFLAGS                += -I$(srctree)/drivers/mstar/mmc/host/eMMCDrv/inc/config/
+
+# compatiblity with mstar2
+EXTRA_CFLAGS                += -I$(srctree)/drivers/mstar2/drv/mmc/inc/api/
+EXTRA_CFLAGS                += -I$(srctree)/drivers/mstar2/drv/mmc/inc/common/
+EXTRA_CFLAGS                += -I$(srctree)/drivers/mstar2/drv/mmc/inc/config/
+EXTRA_CFLAGS                += -I$(srctree)/drivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/mmc
 
 obj-$(CONFIG_MMC)		+= mmc_core.o
 mmc_core-y			:= core.o bus.o host.o \

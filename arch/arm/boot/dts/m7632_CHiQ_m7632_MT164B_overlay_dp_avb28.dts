@@ -1,0 +1,17 @@
+/dts-v1/;
+/plugin/;
+/include/ "overlay_avb_SysAsRoot.dtsi"
+
+&soc_m7632_switch {
+	switch-gpio = <999>;
+};
+
+&i2c2 {
+	iic-mode = <1>;     /* i2c-mode: 0:swi2c; 1:hwi2c */
+	bus-index = <2>;    /* swi2c setting: bus index */
+	sda-gpio = <83>;   /* swi2c setting: sda pad */
+	scl-gpio = <82>;   /* swi2c setting: scl pad */
+	def-delay = <100>;  /* swi2c setting: clk */
+	hw-port = <0>;      /* hwi2c setting: port */
+	pad-mux = <1>;      /* hwi2c setting: pad mux */
+};

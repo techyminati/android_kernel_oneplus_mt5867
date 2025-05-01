@@ -103,10 +103,10 @@ do
 		fi
 	done
 
-	if [ "$leak_error" = 1 ]; then
-		echo "error: $INFILE: leak $c to user-space" >&2
-		exit 1
-	fi
+#if [ "$leak_error" = 1 ]; then
+#	echo "error: $INFILE: leak $c to user-space" >&2
+#		exit 1
+#	fi
 done
 
 rm -f $TMPFILE

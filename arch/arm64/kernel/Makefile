@@ -10,6 +10,10 @@ CFLAGS_REMOVE_insn.o = $(CC_FLAGS_FTRACE)
 CFLAGS_REMOVE_return_address.o = $(CC_FLAGS_FTRACE)
 CFLAGS_io.o := -D__DISABLE_TRACE_MMIO__
 
+ifeq ($(CONFIG_MP_PLATFORM_ARM_64bit_PORTING),y)
+EXTRA_CFLAGS      +=  -Idrivers/mstar2/include
+endif
+
 # Remove stack protector to avoid triggering unneeded stack canary
 # checks due to randomize_kstack_offset.
 CFLAGS_REMOVE_syscall.o	 = -fstack-protector -fstack-protector-strong
@@ -59,6 +63,7 @@ obj-$(CONFIG_JUMP_LABEL)		+= jump_label.o
 obj-$(CONFIG_KGDB)			+= kgdb.o
 obj-$(CONFIG_EFI)			+= efi.o efi-entry.stub.o		\
 					   efi-rt-wrapper.o
+obj-$(CONFIG_MP_PCI_MSTAR)	+= bios32.o
 obj-$(CONFIG_PCI)			+= pci.o
 obj-$(CONFIG_ARMV8_DEPRECATED)		+= armv8_deprecated.o
 obj-$(CONFIG_ACPI)			+= acpi.o
@@ -79,8 +84,16 @@ obj-$(CONFIG_ARM64_PTR_AUTH)		+= pointer_auth.o
 obj-$(CONFIG_ARM64_MTE)			+= mte.o
 obj-y					+= vdso-wrap.o
 obj-$(CONFIG_COMPAT_VDSO)		+= vdso32-wrap.o
+obj-$(CONFIG_MSTAR_FASTBOOT)	+= mstar_hibernate.o
+obj-$(CONFIG_MP_PLATFORM_MSTAR_LEGANCY_INTR)	+= mstar_irq.o
 obj-$(CONFIG_UNWIND_PATCH_PAC_INTO_SCS)	+= patch-scs.o
+
+# We need to prevent the SCS patching code from patching itself. Using
+# -mbranch-protection=none here to avoid the patchable PAC opcodes from being
+# generated triggers an issue with full LTO on Clang, which stops emitting PAC
+# instructions altogether. So disable LTO as well for the compilation unit.
 CFLAGS_patch-scs.o			+= -mbranch-protection=none
+CFLAGS_REMOVE_patch-scs.o		+= $(CC_FLAGS_LTO)
 
 # Force dependency (vdso*-wrap.S includes vdso.so through incbin)
 $(obj)/vdso-wrap.o: $(obj)/vdso/vdso.so

@@ -206,16 +206,30 @@ modkern_aflags = $(if $(part-of-module),				\
 			$(KBUILD_AFLAGS_MODULE) $(AFLAGS_MODULE),	\
 			$(KBUILD_AFLAGS_KERNEL) $(AFLAGS_KERNEL))
 
+
+# If building the kernel in a separate objtree expand all occurrences
+# of -Idir to -I$(srctree)/dir except for absolute paths (starting with '/').
+
+
+# -I$(obj) locates generated .h files
+# $(call addtree,-I$(obj)) locates .h files in srctree, from generated .c files
+#   and locates generated .h files
+# FIXME: Replace both with specific CFLAGS* statements in the makefiles
+__c_flags	= $(if $(obj),$(call addtree,-I$(src)) -I$(obj)) \
+		  $(call flags,_c_flags)
+__a_flags	= $(call flags,_a_flags)
+__cpp_flags     = $(call flags,_cpp_flags)
+
 c_flags        = -Wp,-MMD,$(depfile) $(NOSTDINC_FLAGS) $(LINUXINCLUDE)     \
 		 -include $(srctree)/include/linux/compiler_types.h       \
-		 $(_c_flags) $(modkern_cflags)                           \
+		 $(__c_flags) $(modkern_cflags)                           \
 		 $(basename_flags) $(modname_flags)
 
 a_flags        = -Wp,-MMD,$(depfile) $(NOSTDINC_FLAGS) $(LINUXINCLUDE)     \
-		 $(_a_flags) $(modkern_aflags)
+		 $(__a_flags) $(modkern_aflags)
 
 cpp_flags      = -Wp,-MMD,$(depfile) $(NOSTDINC_FLAGS) $(LINUXINCLUDE)     \
-		 $(_cpp_flags)
+		 $(__cpp_flags)
 
 ld_flags       = $(KBUILD_LDFLAGS) $(ldflags-y) $(LDFLAGS_$(@F))
 
@@ -348,29 +362,14 @@ cmd_dtc = $(HOSTCC) -E $(dtc_cpp_flags) -x assembler-with-cpp -o $(dtc-tmp) $< ;
 $(obj)/%.dtb: $(src)/%.dts $(DTC) FORCE
 	$(call if_changed_dep,dtc)
 
-$(obj)/%.dtbo: $(src)/%.dts $(DTC) FORCE
-	$(call if_changed_dep,dtc)
-
-quiet_cmd_fdtoverlay = DTOVL   $@
-      cmd_fdtoverlay = $(objtree)/scripts/dtc/fdtoverlay -o $@ -i $(real-prereqs)
-
-$(multi-dtb-y): FORCE
-	$(call if_changed,fdtoverlay)
-$(call multi_depend, $(multi-dtb-y), .dtb, -dtbs)
-
-DT_CHECKER ?= dt-validate
-DT_CHECKER_FLAGS ?= $(if $(DT_SCHEMA_FILES),,-m)
-DT_BINDING_DIR := Documentation/devicetree/bindings
-# DT_TMP_SCHEMA may be overridden from Documentation/devicetree/bindings/Makefile
-DT_TMP_SCHEMA ?= $(objtree)/$(DT_BINDING_DIR)/processed-schema.json
-
-quiet_cmd_dtb_check =	CHECK   $@
-      cmd_dtb_check =	$(DT_CHECKER) $(DT_CHECKER_FLAGS) -u $(srctree)/$(DT_BINDING_DIR) -p $(DT_TMP_SCHEMA) $@
-
-define rule_dtc
-	$(call cmd_and_fixdep,dtc)
-	$(call cmd,dtb_check)
-endef
+ifeq ($(CONFIG_MSTAR_CHIP),y)
+$(obj)/%.dtbo: $(src)/%.dts FORCE
+	@echo $(DTC) -@ -O dtb -o $@ $<
+	$(DTC) -@ -O dtb -o $@ $<;
+$(obj)/%.main_dtb: $(src)/%.main_dts FORCE
+	@echo $(DTC) -@ -O dtb -o $@ $<
+	$(DTC) -@ -O dtb -o $@ $<;
+endif
 
 $(obj)/%.dt.yaml: $(src)/%.dts $(DTC) $(DT_TMP_SCHEMA) FORCE
 	$(call if_changed_rule,dtc)
@@ -428,20 +427,23 @@ quiet_cmd_lz4_with_size = LZ4     $@
 # U-Boot mkimage
 # ---------------------------------------------------------------------------
 
-MKIMAGE := $(srctree)/scripts/mkuboot.sh
+#MKIMAGE := $(srctree)/scripts/mkuboot.sh
 
 # SRCARCH just happens to match slightly more than ARCH (on sparc), so reduces
 # the number of overrides in arch makefiles
-UIMAGE_ARCH ?= $(SRCARCH)
+UIMAGE_ARCH ?= $(subst 64,,$(SRCARCH))
 UIMAGE_COMPRESSION ?= $(if $(2),$(2),none)
 UIMAGE_OPTS-y ?=
 UIMAGE_TYPE ?= kernel
 UIMAGE_LOADADDR ?= arch_must_set_this
 UIMAGE_ENTRYADDR ?= $(UIMAGE_LOADADDR)
 UIMAGE_NAME ?= 'Linux-$(KERNELRELEASE)'
-
+#We use the readlly cmd to exec cmd repalce exec sh
+#that cause shell warning: shell level (1000) too high, resetting to 1
+# cmd_uimage = $(BASH) $(MKIMAGE) -A $(UIMAGE_ARCH) -O linux \
+#
 quiet_cmd_uimage = UIMAGE  $@
-      cmd_uimage = $(BASH) $(MKIMAGE) -A $(UIMAGE_ARCH) -O linux \
+      cmd_uimage = $(MKIMAGE) -A $(UIMAGE_ARCH) -O linux \
 			-C $(UIMAGE_COMPRESSION) $(UIMAGE_OPTS-y) \
 			-T $(UIMAGE_TYPE) \
 			-a $(UIMAGE_LOADADDR) -e $(UIMAGE_ENTRYADDR) \

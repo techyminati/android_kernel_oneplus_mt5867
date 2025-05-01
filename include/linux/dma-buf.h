@@ -304,7 +304,8 @@ struct dma_buf_ops {
 	int (*end_cpu_access_partial)(struct dma_buf *dmabuf,
 				      enum dma_data_direction,
 				      unsigned int offset, unsigned int len);
-
+		void *(*map)(struct dma_buf *, unsigned long);
+		void (*unmap)(struct dma_buf *, unsigned long, void *);
 	/**
 	 * @mmap:
 	 *
@@ -724,6 +725,8 @@ int dma_buf_end_cpu_access(struct dma_buf *dma_buf,
 int dma_buf_end_cpu_access_partial(struct dma_buf *dma_buf,
 				     enum dma_data_direction dir,
 				     unsigned int offset, unsigned int len);
+void *dma_buf_kmap(struct dma_buf *, unsigned long);
+void dma_buf_kunmap(struct dma_buf *, unsigned long, void *);
 
 int dma_buf_mmap(struct dma_buf *, struct vm_area_struct *,
 		 unsigned long);

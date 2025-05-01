@@ -4,20 +4,47 @@
  *
  * Copyright (C) 2010 ARM Ltd.
  * Written by Catalin Marinas <catalin.marinas@arm.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #ifndef __ASM_OUTERCACHE_H
 #define __ASM_OUTERCACHE_H
 
 #include <linux/types.h>
+#include <mstar/mpatch_macro.h>
 
 struct l2x0_regs;
 
 struct outer_cache_fns {
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+#if (MP_PLATFORM_ARM == 1)
+	int (*is_enable)(void);
+#endif	/*MP_PLATFORM_ARM */
+#endif
 	void (*inv_range)(unsigned long, unsigned long);
 	void (*clean_range)(unsigned long, unsigned long);
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+#if (MP_PLATFORM_ARM == 1)
+	void (*clean_all)(void);
+#endif /*MP_PLATFORM_ARM*/
+#endif
 	void (*flush_range)(unsigned long, unsigned long);
 	void (*flush_all)(void);
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+	void (*inv_all)(void);
+#endif
 	void (*disable)(void);
 #ifdef CONFIG_OUTER_CACHE_SYNC
 	void (*sync)(void);
@@ -105,16 +132,85 @@ static inline void outer_resume(void)
 
 #else
 
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+extern void  _chip_flush_miu_pipe(void);
+#endif
 static inline void outer_inv_range(phys_addr_t start, phys_addr_t end)
-{ }
+{
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+#if (MP_PLATFORM_ARM == 1)
+    _chip_flush_miu_pipe();
+#endif //MP_PLATFORM_ARM == 1 for inner L2 cpu, need to add mstar flush piple
+#endif
+}
 static inline void outer_clean_range(phys_addr_t start, phys_addr_t end)
-{ }
+{
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+#if (MP_PLATFORM_ARM == 1)
+    _chip_flush_miu_pipe();
+#endif //MP_PLATFORM_ARM == 1 for inner L2 cpu, need to add mstar flush piple
+#endif
+}
 static inline void outer_flush_range(phys_addr_t start, phys_addr_t end)
-{ }
-static inline void outer_flush_all(void) { }
-static inline void outer_disable(void) { }
-static inline void outer_resume(void) { }
+{
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+#if (MP_PLATFORM_ARM == 1)
+    _chip_flush_miu_pipe();
+#endif //MP_PLATFORM_ARM == 1 for inner L2 cpu, need to add mstar flush piple
+#endif
+}
+static inline void outer_flush_all(void)
+{
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+#if (MP_PLATFORM_ARM == 1)
+    _chip_flush_miu_pipe();
+#endif //MP_PLATFORM_ARM == 1 for inner L2 cpu, need to add mstar flush piple
+#endif
+}
 
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+static inline void outer_inv_all(void)
+{
+#if (MP_PLATFORM_ARM == 1)
+    _chip_flush_miu_pipe();
+#endif //MP_PLATFORM_ARM == 1 for inner L2 cpu, need to add mstar flush piple
+}
+#endif
+
+static inline void outer_disable(void)
+{
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+#if (MP_PLATFORM_ARM == 1)
+    _chip_flush_miu_pipe();
+#endif //MP_PLATFORM_ARM == 1 for inner L2 cpu, need to add mstar flush piple
+#endif
+}
+static inline void outer_resume(void)
+{
+#ifdef CONFIG_MP_PLATFORM_ARM_32bit_PORTING
+#if (MP_PLATFORM_ARM == 1)
+    _chip_flush_miu_pipe();
+#endif //MP_PLATFORM_ARM == 1 for inner L2 cpu, need to add mstar flush piple
+#endif
+}
+
+#endif
+
+#ifdef CONFIG_OUTER_CACHE_SYNC
+/**
+ * outer_sync - perform a sync point for outer cache
+ *
+ * Ensure that all outer cache operations are complete and any store
+ * buffers are drained.
+ */
+static inline void outer_sync(void)
+{
+	if (outer_cache.sync)
+		outer_cache.sync();
+}
+#else
+static inline void outer_sync(void)
+{ }
 #endif
 
 #endif	/* __ASM_OUTERCACHE_H */

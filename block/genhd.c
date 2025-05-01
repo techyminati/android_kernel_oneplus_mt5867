@@ -115,7 +115,15 @@ const char *bdevname(struct block_device *bdev, char *buf)
 		snprintf(buf, BDEVNAME_SIZE, "%sp%d", hd->disk_name, partno);
 	else
 		snprintf(buf, BDEVNAME_SIZE, "%s%d", hd->disk_name, partno);
-
+/*#if (1 == MP_SCSI_MSTAR_SD_CARD_IMMEDIATELY_UNPLUG)
+	if(NULL == bdev->bd_part)
+	{
+		printk("%s:%d  NULL == bdev->bd_part !!!!\n",__FUNCTION__,__LINE__);
+		snprintf(buf, BDEVNAME_SIZE, "%s", bdev->bd_disk->disk_name);
+		return buf;
+	}
+#endif*/
+	
 	return buf;
 }
 EXPORT_SYMBOL(bdevname);

@@ -25,6 +25,7 @@
 #include <linux/debugfs.h>
 #include <linux/serial_core.h>
 #include <linux/sysfs.h>
+#include <mstar/mpatch_macro.h>
 #include <linux/random.h>
 
 #include <asm/setup.h>  /* for COMMAND_LINE_SIZE */
@@ -912,22 +913,43 @@ static void __early_init_dt_declare_initrd(unsigned long start,
 		initrd_below_start_ok = 1;
 	}
 }
-
 /**
  * early_init_dt_check_for_initrd - Decode initrd location from flat tree
  * @node: reference to node containing initrd location ('chosen')
  */
+#if (MP_PLATFORM_ARM_64bit_PORTING == 1 || MP_PLATFORM_ARM_32bit_PORTING == 1)
+extern unsigned long __ramdisk_start, __ramdisk_len;
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 1)
+extern unsigned long __cmdline;
+char* cmd_ptr;
+#endif
+#endif
 static void __init early_init_dt_check_for_initrd(unsigned long node)
 {
 	u64 start, end;
 	int len;
 	const __be32 *prop;
-
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 1)
+	cmd_ptr = (char *)__cmdline;
+#endif
 	if (!IS_ENABLED(CONFIG_BLK_DEV_INITRD))
 		return;
 
 	pr_debug("Looking for initrd properties... ");
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 1)
+	/*
+	 * ramdisk porting problem,
+	 * move patch from 3.10.40 (Perforce #cl 1038050)
+	*/
+	pr_info("%s: Looking for initrd properties... \n", __func__);
+	pr_info("%s: initrd_start = 0x%lx  initrd_end = 0x%lx\n",
+			__func__, __ramdisk_start, __ramdisk_start + __ramdisk_len);
 
+	initrd_start = (unsigned long)__va(__ramdisk_start);
+	initrd_end = (unsigned long)__va(__ramdisk_start+__ramdisk_len);
+	initrd_below_start_ok = 1;
+
+#else
 	prop = of_get_flat_dt_prop(node, "linux,initrd-start", &len);
 	if (!prop)
 		return;
@@ -941,8 +963,10 @@ static void __init early_init_dt_check_for_initrd(unsigned long node)
 	__early_init_dt_declare_initrd(start, end);
 	phys_initrd_start = start;
 	phys_initrd_size = end - start;
-
+#endif
 	pr_debug("initrd_start=0x%llx  initrd_end=0x%llx\n", start, end);
+		printk("initrd_start = 0x%llx  initrd_end = 0x%llx\n",
+		 (unsigned long long)initrd_start, (unsigned long long)initrd_end);
 }
 
 /**
@@ -1118,6 +1142,21 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 
 		base = dt_mem_next_cell(dt_root_addr_cells, &reg);
 		size = dt_mem_next_cell(dt_root_size_cells, &reg);
+#if (MP_PLATFORM_ARM_64bit_BOOTARGS_NODTB == 0)
+		if(lx_num == 0){
+			linux_memory_address = base;
+			linux_memory_length = size;
+		}
+		else if(lx_num == 1){
+			linux_memory2_address = base;
+			linux_memory2_length = size;
+		}
+		else if(lx_num == 2){
+			linux_memory3_address = base;
+                        linux_memory3_length = size;
+		}
+		lx_num ++;
+#endif
 
 		if (size == 0)
 			continue;
@@ -1310,7 +1349,6 @@ void __init early_init_dt_scan_nodes(void)
 
 	/* Setup memory, calling early_init_dt_add_memory_arch */
 	of_scan_flat_dt(early_init_dt_scan_memory, NULL);
-
 	/* Handle linux,usable-memory-range property */
 	early_init_dt_check_for_usable_mem_range();
 }

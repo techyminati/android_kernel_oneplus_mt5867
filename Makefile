@@ -407,6 +407,7 @@ include $(srctree)/scripts/subarch.include
 # Default value for CROSS_COMPILE is not to prefix executables
 # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
 ARCH		?= $(SUBARCH)
+CROSS_COMPILE	?= $(CONFIG_CROSS_COMPILE:"%"=%)
 
 # Architecture as present in compile.h
 UTS_MACHINE 	:= $(ARCH)
@@ -540,9 +541,18 @@ LINUXINCLUDE    := \
 KBUILD_AFLAGS   := -D__ASSEMBLY__ -fno-PIE
 KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common -fshort-wchar -fno-PIE \
-		   -Werror=implicit-function-declaration -Werror=implicit-int \
-		   -Werror=return-type -Wno-format-security \
+		   -Werror=implicit-function-declaration \
+		   -Wno-format-security \
 		   -std=gnu89
+#		   -Werror=return-type -Wno-format-security \
+		   -std=gnu89
+#change compile option to patch utopia2k compile error
+ifeq ($(CONFIG_MP_PLATFORM_UTOPIA2K_COMPILE_PATCH),y)
+KBUILD_CFLAGS   += $(call cc-option,-Wimplicit-int)
+else
+# disallow errors like 'EXPORT_GPL(foo);' with missing header
+KBUILD_CFLAGS   += $(call cc-option,-Werror=implicit-int)
+endif
 KBUILD_CPPFLAGS := -D__KERNEL__
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
@@ -558,6 +568,7 @@ export PERL PYTHON3 CHECK CHECKFLAGS MAKE UTS_MACHINE HOSTCXX
 export KGZIP KBZIP2 KLZOP LZMA LZ4 XZ ZSTD
 export KBUILD_HOSTCXXFLAGS KBUILD_HOSTLDFLAGS KBUILD_HOSTLDLIBS LDFLAGS_MODULE
 export KBUILD_USERCFLAGS KBUILD_USERLDFLAGS
+export HOSTLDFLAGS
 
 export KBUILD_CPPFLAGS NOSTDINC_FLAGS LINUXINCLUDE OBJCOPYFLAGS KBUILD_LDFLAGS
 export KBUILD_CFLAGS CFLAGS_KERNEL CFLAGS_MODULE
@@ -565,11 +576,14 @@ export KBUILD_AFLAGS AFLAGS_KERNEL AFLAGS_MODULE
 export KBUILD_AFLAGS_MODULE KBUILD_CFLAGS_MODULE KBUILD_LDFLAGS_MODULE
 export KBUILD_AFLAGS_KERNEL KBUILD_CFLAGS_KERNEL
 export PAHOLE_FLAGS
+export KCONFIG_DEBUG_PATH
 
 # Files to ignore in find ... statements
 
-export RCS_FIND_IGNORE := \( -name SCCS -o -name BitKeeper -o -name .svn -o    \
-			  -name CVS -o -name .pc -o -name .hg -o -name .git \) \
+export MTK_CLEAN_IGNORE_PATH   := fusion_loader
+
+export RCS_FIND_IGNORE := \( -name SCCS -o -name BitKeeper -o -name .svn -o \
+			  -name CVS -o -name .pc -o -name .hg -o -name .git -o -name $(MTK_CLEAN_IGNORE_PATH) \) \
 			  -prune -o
 export RCS_TAR_IGNORE := --exclude SCCS --exclude BitKeeper --exclude .svn \
 			 --exclude CVS --exclude .pc --exclude .hg --exclude .git
@@ -644,6 +658,9 @@ config: outputmakefile scripts_basic FORCE
 	$(Q)$(MAKE) $(build)=scripts/kconfig $@
 
 %config: outputmakefile scripts_basic FORCE
+ifneq ($(NCT5_BUILD),true)
+	$(Q)$(CONFIG_SHELL) $(srctree)/genlink.sh
+endif
 	$(Q)$(MAKE) $(build)=scripts/kconfig $@
 
 else #!config-build
@@ -816,7 +833,11 @@ KBUILD_CFLAGS += -fno-reorder-blocks -fno-ipa-cp-clone -fno-partial-inlining
 endif
 
 ifneq ($(CONFIG_FRAME_WARN),0)
-KBUILD_CFLAGS += -Wframe-larger-than=$(CONFIG_FRAME_WARN)
+ifeq ($(shell $(CC) --version|grep "20141031"|awk '{print $$6}'), 20141031)
+KBUILD_CFLAGS += $(call cc-option,-Werror=frame-larger-than=${CONFIG_FRAME_WARN})
+else
+KBUILD_CFLAGS += $(call cc-option,-Wframe-larger-than=${CONFIG_FRAME_WARN})
+endif
 endif
 
 stackp-flags-y                                    := -fno-stack-protector
@@ -872,15 +893,6 @@ ifdef CONFIG_INIT_STACK_ALL_PATTERN
 KBUILD_CFLAGS	+= -ftrivial-auto-var-init=pattern
 endif
 
-# Initialize all stack variables with a zero value.
-ifdef CONFIG_INIT_STACK_ALL_ZERO
-KBUILD_CFLAGS	+= -ftrivial-auto-var-init=zero
-ifdef CONFIG_CC_HAS_AUTO_VAR_INIT_ZERO_ENABLER
-# https://github.com/llvm/llvm-project/issues/44842
-KBUILD_CFLAGS	+= -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
-endif
-endif
-
 # While VLAs have been removed, GCC produces unreachable stack probes
 # for the randomize_kstack_offset feature. Disable it for all compilers.
 KBUILD_CFLAGS	+= $(call cc-option, -fno-stack-clash-protection)
@@ -904,6 +916,10 @@ ifdef CONFIG_AS_IS_LLVM
 KBUILD_AFLAGS	+= -g
 else
 KBUILD_AFLAGS	+= -Wa,-gdwarf-2
+endif
+
+ifeq ($(CONFIG_MP_COMPILER_ERROR),y)
+KBUILD_CFLAGS   += -Wno-int-conversion -Wno-unused-variable -Wno-strict-prototypes -Wno-implicit-int
 endif
 
 ifndef CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
@@ -1102,6 +1118,9 @@ KBUILD_CPPFLAGS += $(call cc-option,-fmacro-prefix-map=$(srctree)/=)
 
 # include additional Makefiles when needed
 include-y			:= scripts/Makefile.extrawarn
+ifdef MAX_CNT_STR
+KBUILD_CFLAGS += -DMAX_CNT_STR
+endif
 include-$(CONFIG_KASAN)		+= scripts/Makefile.kasan
 include-$(CONFIG_KCSAN)		+= scripts/Makefile.kcsan
 include-$(CONFIG_UBSAN)		+= scripts/Makefile.ubsan
@@ -1116,6 +1135,7 @@ include $(addprefix $(srctree)/, $(include-y))
 
 # Add user supplied CPPFLAGS, AFLAGS and CFLAGS as the last assignments
 KBUILD_CPPFLAGS += $(KCPPFLAGS)
+KBUILD_CPPFLAGS += -I$(srctree)
 KBUILD_AFLAGS   += $(KAFLAGS)
 KBUILD_CFLAGS   += $(KCFLAGS)
 
@@ -1381,6 +1401,7 @@ $(version_h): PATCHLEVEL := $(if $(PATCHLEVEL), $(PATCHLEVEL), 0)
 $(version_h): SUBLEVEL := $(if $(SUBLEVEL), $(SUBLEVEL), 0)
 $(version_h): FORCE
 	$(call filechk,version.h)
+	echo "VERSION Had Check"
 
 include/generated/utsrelease.h: include/config/kernel.release FORCE
 	$(call filechk,utsrelease.h)
@@ -1473,7 +1494,6 @@ kselftest-merge:
 
 # ---------------------------------------------------------------------------
 # Devicetree files
-
 ifneq ($(wildcard $(srctree)/arch/$(SRCARCH)/boot/dts/),)
 # ANDROID: allow this to be overridden by the build environment. This allows
 # one to compile a device tree that is located out-of-tree.
@@ -1488,9 +1508,29 @@ ifneq ($(dtstree),)
 %.dtbo: include/config/kernel.release scripts_dtc
 	$(Q)$(MAKE) $(build)=$(dtstree) $(dtstree)/$@
 
+ifeq ($(CONFIG_MSTAR_ARM),y)
+%.dtb %.dtbo %.main_dtb: | scripts
+else
+%.dtb: | scripts
+endif
+	$(Q)$(MAKE) $(build)=$(boot)/dts MACHINE=$(MACHINE) $(boot)/dts/$@
+
+ifeq ($(CONFIG_MSTAR_CHIP),y)
+PHONY +=copy_all_dtb
+copy_all_dtb:
+	@$(foreach dir, $(wildcard $(boot)/dts/mediatek-dtv/*.dtb), $(shell cp $(dir) $(boot)/dts/))
+	@$(foreach dir, $(wildcard $(boot)/dts/mediatek-dtv/*.dtbo), $(shell cp $(dir) $(boot)/dts/))
+	@$(foreach dir, $(wildcard $(boot)/dts/mediatek-dtv/*.main_dtb), $(shell cp $(dir) $(boot)/dts/))
+endif
+
+
 PHONY += dtbs dtbs_install dtbs_check
 dtbs: include/config/kernel.release scripts_dtc
 	$(Q)$(MAKE) $(build)=$(dtstree)
+ifeq ($(CONFIG_MSTAR_CHIP),y)
+	@echo "Copy dtb to dts folder, temporary patch"
+	@make copy_all_dtb
+endif
 
 ifneq ($(filter dtbs_check, $(MAKECMDGOALS)),)
 export CHECK_DTBS=y
@@ -1647,7 +1687,7 @@ mrproper: clean $(mrproper-dirs)
 PHONY += distclean
 
 distclean: mrproper
-	@find . $(RCS_FIND_IGNORE) \
+	@find -L . $(RCS_FIND_IGNORE) \
 		\( -name '*.orig' -o -name '*.rej' -o -name '*~' \
 		-o -name '*.bak' -o -name '#*#' -o -name '*%' \
 		-o -name 'core' -o -name tags -o -name TAGS -o -name 'cscope*' \
@@ -1672,6 +1712,8 @@ board-dirs := $(dir $(wildcard $(srctree)/arch/$(SRCARCH)/configs/*/*_defconfig)
 board-dirs := $(sort $(notdir $(board-dirs:/=)))
 
 PHONY += help
+debug:
+	@echo  'Cleaning machine:$(CLEAN_FILES)'
 help:
 	@echo  'Cleaning targets:'
 	@echo  '  clean		  - Remove most generated files but keep the config and'
@@ -1963,12 +2005,12 @@ $(clean-dirs):
 
 clean: $(clean-dirs)
 	$(call cmd,rmfiles)
-	@find $(if $(KBUILD_EXTMOD), $(KBUILD_EXTMOD), .) \
+	@find -L $(if $(KBUILD_EXTMOD), $(KBUILD_EXTMOD), .) \
 		$(if $(filter-out arch/$(SRCARCH)/boot/dts, $(dtstree)), $(dtstree)) \
 		$(RCS_FIND_IGNORE) \
 		\( -name '*.[aios]' -o -name '*.ko' -o -name '.*.cmd' \
 		-o -name '*.ko.*' \
-		-o -name '*.dtb' -o -name '*.dtbo' -o -name '*.dtb.S' -o -name '*.dt.yaml' \
+		-o -name '*.dtb' -o -name '*.dtbo' -o -name '*.main_dtb' -o -name '*.dtb.S' -o -name '*.dt.yaml' \
 		-o -name '*.dwo' -o -name '*.lst' \
 		-o -name '*.su' -o -name '*.mod' -o -name '*.usyms' \
 		-o -name '.*.d' -o -name '.*.tmp' -o -name '*.mod.c' \
@@ -1980,6 +2022,12 @@ clean: $(clean-dirs)
 		-o -name '*.ll' \
 		-o -name '*.gcno' \
 		-o -name '*.*.symversions' \) -type f -print | xargs rm -f
+ifneq ($(NCT5_BUILD),true)
+# Mstar patches
+	$(Q)$(MAKE) -C ./drivers/mstar2 clean
+	rm -f include/linux/fusion.h
+	$(Q)$(CONFIG_SHELL) $(srctree)/unlink.sh
+endif
 
 # Generate tags for editors
 # ---------------------------------------------------------------------------

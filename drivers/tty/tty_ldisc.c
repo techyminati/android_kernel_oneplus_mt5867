@@ -20,6 +20,7 @@
 #include <linux/uaccess.h>
 #include <linux/ratelimit.h>
 #include "tty.h"
+#include <mstar/mpatch_macro.h>
 
 #undef LDISC_DEBUG_HANGUP
 
@@ -142,6 +143,13 @@ static int tty_ldisc_autoload = IS_BUILTIN(CONFIG_LDISC_AUTOLOAD);
  *	Locking:
  *		takes tty_ldiscs_lock to guard against ldisc races
  */
+
+#if defined(CONFIG_LDISC_AUTOLOAD)
+	#define INITIAL_AUTOLOAD_STATE	1
+#else
+	#define INITIAL_AUTOLOAD_STATE	0
+#endif
+
 
 static struct tty_ldisc *tty_ldisc_get(struct tty_struct *tty, int disc)
 {
@@ -763,8 +771,10 @@ void tty_ldisc_hangup(struct tty_struct *tty, bool reinit)
 
 int tty_ldisc_setup(struct tty_struct *tty, struct tty_struct *o_tty)
 {
-	int retval = tty_ldisc_open(tty, tty->ldisc);
+	struct tty_ldisc *ld = tty->ldisc;
+	int retval;
 
+	retval = tty_ldisc_open(tty, ld);
 	if (retval)
 		return retval;
 

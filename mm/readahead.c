@@ -187,6 +187,11 @@ void page_cache_ra_unbounded(struct readahead_control *ractl,
 	struct address_space *mapping = ractl->mapping;
 	unsigned long index = readahead_index(ractl);
 	LIST_HEAD(page_pool);
+#ifdef CONFIG_MP_CMA_PATCH_USE_UNMOVABLE_FILE_CACHE
+	gfp_t temp_gfp_mask = mapping_gfp_mask(mapping);
+	temp_gfp_mask &= ~__GFP_MOVABLE;
+	mapping_set_gfp_mask(mapping, temp_gfp_mask);
+#endif
 	gfp_t gfp_mask = readahead_gfp_mask(mapping);
 	unsigned long i;
 
@@ -252,6 +257,27 @@ void page_cache_ra_unbounded(struct readahead_control *ractl,
 }
 EXPORT_SYMBOL_GPL(page_cache_ra_unbounded);
 
+#if (MP_NTFS3G_WRAP==1)
+/*
+ * This version skips the IO if the queue is read-congested, and will tell the
+ * block layer to abandon the readahead if request allocation would block.
+ *
+ * force_page_cache_readahead() will ignore queue congestion and will block on
+ * request queues.
+ */
+void  do_page_cache_readahead(struct address_space *mapping, struct file *filp,
+                        pgoff_t offset, unsigned long nr_to_read)
+{
+	//struct readahead_control *ractl = container_of(mapping, struct readahead_control, mapping);
+	struct readahead_control *ractl =
+		container_of(&mapping, struct readahead_control, mapping);
+	if (bdi_read_congested(inode_to_bdi(mapping->host)))
+		return;
+	//return __do_page_cache_readahead(mapping, filp, offset, nr_to_read, 0);
+	page_cache_ra_unbounded(ractl, nr_to_read, 0);
+}
+EXPORT_SYMBOL(do_page_cache_readahead);
+#endif
 /*
  * do_page_cache_ra() actually reads a chunk of disk.  It allocates
  * the pages first, then submits them for I/O. This avoids the very bad

@@ -60,3 +60,8 @@ obj-$(CONFIG_UNIPHIER_THERMAL)	+= uniphier_thermal.o
 obj-$(CONFIG_AMLOGIC_THERMAL)     += amlogic_thermal.o
 obj-$(CONFIG_SPRD_THERMAL)	+= sprd_thermal.o
 obj-$(CONFIG_KHADAS_MCU_FAN_THERMAL)	+= khadas_mcu_fan.o
+ifdef CONFIG_MSTAR_DVFS
+EXTRA_CFLAGS += -Idrivers/mstar2/drv/dvfs/include
+EXTRA_CFLAGS += -Idrivers/mstar2/include
+EXTRA_CFLAGS += -Idrivers/mstar2/hal/$(CONFIG_MSTAR_CHIP_NAME)/dvfs
+endif

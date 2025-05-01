@@ -426,6 +426,9 @@ ENDPROC(sys_fstatfs64_wrapper)
  * Note: off_4k (r5) is always units of 4K.  If we can't do the requested
  * offset, we return EINVAL.
  */
+#ifdef CONFIG_MP_PLATFORM_UTOPIA2K_EXPORT_SYMBOL
+ENTRY(sys_mmap)
+#endif
 sys_mmap2:
 		str	r5, [sp, #4]
 		b	sys_mmap_pgoff

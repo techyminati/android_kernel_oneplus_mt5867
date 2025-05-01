@@ -1,0 +1,1 @@
+obj-$(CONFIG_SW_SYNC) += swsync.o

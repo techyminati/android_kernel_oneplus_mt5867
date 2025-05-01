@@ -88,6 +88,34 @@ void usb_put_function(struct usb_function *f)
 }
 EXPORT_SYMBOL_GPL(usb_put_function);
 
+#if defined(CONFIG_MS_OTG_SOFTWARE_ID)
+/*
+OTG host/peripheral boot argument for backup
+
+*/
+bool OTG_backup_bootArgu_on;
+bool OTG_backup_id_host = true; /* default host mode */
+
+static int __init OTG_backup_id_setup(char *str)
+{
+	OTG_backup_bootArgu_on = true;
+
+	if (!strncmp(str, "device", 6)) {
+		OTG_backup_id_host = false;
+		pr_info("[OTGBACKUP] bootarg=device\n");
+	} else {
+		OTG_backup_id_host = true;
+		pr_info("[OTGBACKUP] bootarg=host\n");
+	}
+
+	return 1;
+}
+
+__setup("USB_OTG_SOFTWARE_ID=", OTG_backup_id_setup);
+EXPORT_SYMBOL(OTG_backup_bootArgu_on);
+EXPORT_SYMBOL(OTG_backup_id_host);
+#endif
+
 int usb_function_register(struct usb_function_driver *newf)
 {
 	struct usb_function_driver *fd;

@@ -1027,6 +1027,7 @@ static inline void __iomem *ioremap(phys_addr_t offset, size_t size)
 	return (void __iomem *)(unsigned long)offset;
 }
 #endif
+#define ioremap_nocache ioremap
 
 #ifndef iounmap
 #define iounmap iounmap

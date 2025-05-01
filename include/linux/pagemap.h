@@ -704,7 +704,14 @@ int __set_page_dirty_nobuffers(struct page *page);
 int __set_page_dirty_no_writeback(struct page *page);
 
 void page_endio(struct page *page, bool is_write, int err);
-
+#ifdef CONFIG_MP_CMA_PATCH_KSM_MIGRATION_FAILURE
+extern void wait_on_page_bit_timeout(struct page *page, int bit_nr);
+static inline void wait_on_page_locked_timeout(struct page *page)
+{
+	if (PageLocked(page))
+		wait_on_page_bit_timeout(page, PG_locked);
+}
+#endif
 /**
  * set_page_private_2 - Set PG_private_2 on a page and take a ref
  * @page: The page.

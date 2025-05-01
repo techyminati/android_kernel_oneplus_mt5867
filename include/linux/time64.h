@@ -4,6 +4,8 @@
 
 #include <linux/math64.h>
 #include <vdso/time64.h>
+#include <linux/types.h>
+#include <linux/time_types.h>
 
 typedef __s64 time64_t;
 typedef __u64 timeu64_t;
@@ -164,5 +166,38 @@ static __always_inline void timespec64_add_ns(struct timespec64 *a, u64 ns)
  */
 extern struct timespec64 timespec64_add_safe(const struct timespec64 lhs,
 					 const struct timespec64 rhs);
+
+#if __BITS_PER_LONG == 64
+
+/* timespec64 is defined as timespec here */
+static inline struct timespec timespec64_to_timespec(const struct timespec64 ts64)
+{
+	return *(const struct timespec *)&ts64;
+}
+
+static inline struct timespec64 timespec_to_timespec64(const struct timespec ts)
+{
+	return *(const struct timespec64 *)&ts;
+}
+
+#else
+static inline struct timespec timespec64_to_timespec(const struct timespec64 ts64)
+{
+	struct timespec ret;
+
+	ret.tv_sec = (time_t)ts64.tv_sec;
+	ret.tv_nsec = ts64.tv_nsec;
+	return ret;
+}
+
+static inline struct timespec64 timespec_to_timespec64(const struct timespec ts)
+{
+	struct timespec64 ret;
+
+	ret.tv_sec = ts.tv_sec;
+	ret.tv_nsec = ts.tv_nsec;
+	return ret;
+}
+#endif
 
 #endif /* _LINUX_TIME64_H */

@@ -30,3 +30,6 @@ subdir-y += synaptics
 subdir-y += ti
 subdir-y += toshiba
 subdir-y += xilinx
+ifeq ($(CONFIG_MSTAR_CHIP),y)
+subdir-y += mediatek-dtv
+endif

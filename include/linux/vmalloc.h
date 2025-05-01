@@ -231,6 +231,11 @@ static inline bool is_vm_area_hugepages(const void *addr)
 	return false;
 #endif
 }
+#ifdef CONFIG_MP_CMA_PATCH_POOL_UTOPIA_TO_KERNEL
+int vmap_pages_range(unsigned long addr, unsigned long end,
+		pgprot_t prot, struct page **pages, unsigned int page_shift);
+void free_unmap_vmap_start_end(unsigned long start,unsigned long end);
+#endif
 
 #ifdef CONFIG_MMU
 void vunmap_range(unsigned long addr, unsigned long end);

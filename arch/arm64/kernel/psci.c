@@ -21,6 +21,10 @@
 #include <asm/errno.h>
 #include <asm/smp_plat.h>
 
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+#include "mdrv_types.h"
+#endif
+
 static int __init cpu_psci_cpu_init(unsigned int cpu)
 {
 	return 0;
@@ -65,6 +69,11 @@ static int cpu_psci_cpu_disable(unsigned int cpu)
 	return 0;
 }
 
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+extern void Chip_Flush_Cache_All_Single(void);
+extern void fpsimd_clear_state(void);
+#endif
+
 static void cpu_psci_cpu_die(unsigned int cpu)
 {
 	/*
@@ -74,7 +83,19 @@ static void cpu_psci_cpu_die(unsigned int cpu)
 	u32 state = PSCI_POWER_STATE_TYPE_POWER_DOWN <<
 		    PSCI_0_2_POWER_STATE_TYPE_SHIFT;
 
+#ifdef CONFIG_MP_PLATFORM_ARM_64bit_PORTING
+	if(TEEINFO_TYPTE==SECURITY_TEEINFO_OSTYPE_OPTEE)
+	{
+#if defined(CONFIG_MP_MSTAR_STR_BASE)
+		fpsimd_clear_state();
+#endif
+		Chip_Flush_Cache_All_Single();
+	}
+#endif
+
 	psci_ops.cpu_off(state);
+
+	pr_crit("unable to power off CPU%u\n", cpu);
 }
 
 static int cpu_psci_cpu_kill(unsigned int cpu)
@@ -111,6 +132,10 @@ static int cpu_psci_cpu_kill(unsigned int cpu)
 
 const struct cpu_operations cpu_psci_ops = {
 	.name		= "psci",
+#if defined(CONFIG_CPU_IDLE) || defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
+	.cpu_init_idle	= mstar_psci_cpu_init_idle,
+	.cpu_suspend	= mstar_psci_cpu_suspend_enter,
+#endif
 	.cpu_init	= cpu_psci_cpu_init,
 	.cpu_prepare	= cpu_psci_cpu_prepare,
 	.cpu_boot	= cpu_psci_cpu_boot,

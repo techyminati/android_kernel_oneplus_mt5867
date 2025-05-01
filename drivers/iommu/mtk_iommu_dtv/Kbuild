@@ -1,0 +1,72 @@
+##############################################################################
+#MediaTek Inc. (C) 2018. All rights reserved.
+#Copyright Statement:
+#This software/firmware and related documentation ("MediaTek Software") are
+#protected under relevant copyright laws. The information contained herein is
+#confidential and proprietary to MediaTek Inc. and/or its licensors. Without
+#the prior written permission of MediaTek inc. and/or its licensors, any
+#reproduction, modification, use or disclosure of MediaTek Software, and
+#information contained herein, in whole or in part, shall be strictly
+#prohibited.
+#BY OPENING THIS FILE, RECEIVER HEREBY UNEQUIVOCALLY ACKNOWLEDGES AND AGREES
+#THAT THE SOFTWARE/FIRMWARE AND ITS DOCUMENTATIONS ("MEDIATEK SOFTWARE")
+#RECEIVED FROM MEDIATEK AND/OR ITS REPRESENTATIVES ARE PROVIDED TO RECEIVER
+#ON AN "AS-IS" BASIS ONLY. MEDIATEK EXPRESSLY DISCLAIMS ANY AND ALL
+#WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED
+#WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE OR
+#NONINFRINGEMENT. NEITHER DOES MEDIATEK PROVIDE ANY WARRANTY WHATSOEVER WITH
+#RESPECT TO THE SOFTWARE OF ANY THIRD PARTY WHICH MAY BE USED BY,
+#INCORPORATED IN, OR SUPPLIED WITH THE MEDIATEK SOFTWARE, AND RECEIVER AGREES
+#TO LOOK ONLY TO SUCH THIRD PARTY FOR ANY WARRANTY CLAIM RELATING THERETO.
+#RECEIVER EXPRESSLY ACKNOWLEDGES THAT IT IS RECEIVER'S SOLE RESPONSIBILITY TO
+#OBTAIN FROM ANY THIRD PARTY ALL PROPER LICENSES CONTAINED IN MEDIATEK
+#SOFTWARE. MEDIATEK SHALL ALSO NOT BE RESPONSIBLE FOR ANY MEDIATEK SOFTWARE
+#RELEASES MADE TO RECEIVER'S SPECIFICATION OR TO CONFORM TO A PARTICULAR
+#STANDARD OR OPEN FORUM. RECEIVER'S SOLE AND EXCLUSIVE REMEDY AND MEDIATEK'S
+#ENTIRE AND CUMULATIVE LIABILITY WITH RESPECT TO THE MEDIATEK SOFTWARE
+#RELEASED HEREUNDER WILL BE, AT MEDIATEK'S OPTION, TO REVISE OR REPLACE THE
+#MEDIATEK SOFTWARE AT ISSUE, OR REFUND ANY SOFTWARE LICENSE FEES OR SERVICE
+#CHARGE PAID BY RECEIVER TO MEDIATEK FOR SUCH MEDIATEK SOFTWARE AT ISSUE.
+#The following software/firmware and/or related documentation ("MediaTek
+#Software") have been modified by MediaTek Inc. All revisions are subject to
+#any receiver's applicable license agreements with MediaTek Inc.
+##############################################################################
+ccflags-y += -I$(srctree)/mm -I$(srctree)/drivers/iommu/mtk_iommu_dtv/uapi/linux
+ccflags-y += -Wall -Werror -Wno-unused-function
+
+mtk_iommu-objs := mtk_iommu_dtv.o \
+    mtk_iommu_trace.o \
+    mtk_iommu_helper.o \
+    mtk_iommu_tee_interface.o \
+    mtk_iommu_of.o \
+    mtk_iommu_sysfs.o \
+    mtk_iommu_defer_free.o \
+    mtk_iommu_pool_collector.o
+
+# XXX: Remove CONFIG_MTK_DMABUF_HEAPS_SYSTEM after Google issue b/243501482 done
+ifneq ($(CONFIG_DMABUF_HEAPS_SYSTEM)$(CONFIG_MTK_DMABUF_HEAPS_SYSTEM),)
+mtk_iommu-objs += mtk_iommu_dmaheap.o \
+    dma-heaps/mtk_iommu_heap.o \
+    dma-heaps/mtk_iommu_carveout_dmaheap.o \
+    dma-heaps/mtk_iommu_sys_dmaheap.o \
+    dma-heaps/mtk_iommu_agile_dmaheap.o \
+    dma-heaps/mtk_iommu_cma_dmaheap.o \
+    dma-heaps/mtk_iommu_dmaheap_ops.o \
+    dma-heaps/mtk_iommu_page_pool.o
+endif
+
+ifdef CONFIG_ION
+ccflags-y += -I$(KERNEL_MIXED_BUILD_PATH)/drivers/iommu/ion
+mtk_iommu-objs += mtk_iommu_ion.o \
+    ion-heaps/mtk_iommu_sys_heap.o \
+    ion-heaps/mtk_iommu_cma_heap.o \
+    ion-heaps/mtk_iommu_ion_heap.o
+ifndef CONFIG_DMABUF_HEAPS_SYSTEM
+mtk_iommu-objs += ion-heaps/mtk_iommu_carveout_heap.o
+endif
+endif
+
+mtk_iommu-objs += mtk_iommu_seal.o
+mtk_iommu-objs += mtk_iommu_test.o
+
+obj-$(CONFIG_MTK_IOMMU_DTV) += mtk_iommu.o

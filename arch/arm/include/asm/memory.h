@@ -273,7 +273,8 @@ static inline unsigned long __phys_to_virt(phys_addr_t x)
 
 #else
 
-#define PHYS_OFFSET	PLAT_PHYS_OFFSET
+//#define PHYS_OFFSET	PLAT_PHYS_OFFSET
+#define PHYS_OFFSET		UL(CONFIG_MEMORY_START_ADDRESS)
 #define PHYS_PFN_OFFSET	((unsigned long)(PHYS_OFFSET >> PAGE_SHIFT))
 
 static inline phys_addr_t __virt_to_phys_nodebug(unsigned long x)

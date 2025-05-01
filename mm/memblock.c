@@ -315,7 +315,7 @@ static phys_addr_t __init_memblock memblock_find_in_range_node(phys_addr_t size,
  * Return:
  * Found address on success, 0 on failure.
  */
-static phys_addr_t __init_memblock memblock_find_in_range(phys_addr_t start,
+phys_addr_t __init_memblock memblock_find_in_range(phys_addr_t start,
 					phys_addr_t end, phys_addr_t size,
 					phys_addr_t align)
 {
@@ -1646,7 +1646,13 @@ phys_addr_t __init_memblock memblock_start_of_DRAM(void)
 {
 	return memblock.memory.regions[0].base;
 }
-
+#if defined(CONFIG_MP_PLATFORM_ARM_64bit_PORTING)
+/* lowest region size */
+phys_addr_t memblock_size_of_first_region(void)
+{
+	return memblock.memory.regions[0].size;
+}
+#endif
 phys_addr_t __init_memblock memblock_end_of_DRAM(void)
 {
 	int idx = memblock.memory.cnt - 1;

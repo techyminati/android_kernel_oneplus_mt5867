@@ -47,11 +47,19 @@
 #include "sd_ops.h"
 #include "sdio_ops.h"
 
+#ifdef CONFIG_MMC_MSTAR_MMC_EMMC
+#include "eMMC.h"
+#endif
+
+/* If the device is not responding */
+#define MMC_CORE_TIMEOUT_MS	(10 * 60 * 1000) /* 10 minute timeout */
+
 /* The max erase timeout, used when host->max_busy_timeout isn't specified */
 #define MMC_ERASE_TIMEOUT_MS	(60 * 1000) /* 60 s */
 #define SD_DISCARD_TIMEOUT_MS	(250)
 
 static const unsigned freqs[] = { 400000, 300000, 200000, 100000 };
+extern struct completion mmc_done;
 
 /*
  * Enabling software CRCs on the data blocks can be a significant (30%)
@@ -2273,7 +2281,9 @@ void mmc_rescan(struct work_struct *work)
 	 */
 	host->err_stats[MMC_ERR_CMD_TIMEOUT] = 0;
 	mmc_release_host(host);
-
+#if !defined(CONFIG_MP_PURE_SN_32BIT) && !defined(CONFIG_MSTAR_ARM_BD_FPGA)
+        complete_all(&mmc_done);
+#endif
  out:
 	if (host->caps & MMC_CAP_NEEDS_POLL)
 		mmc_schedule_delayed_work(&host->detect, HZ);
@@ -2330,6 +2340,26 @@ void mmc_stop_host(struct mmc_host *host)
 static int __init mmc_init(void)
 {
 	int ret;
+	#if (!defined CONFIG_MSTAR_SDMMC) && (!defined (CONFIG_MSTAR_FCIE_HOST)) && (!defined (CONFIG_MSTAR_SDIO_HOST))
+	U16 u16_regval = 0;
+
+	#ifdef IP_FCIE_VERSION_5
+	u16_regval = REG_FCIE(FCIE_NC_FUN_CTL);	//fcie reset doesn't reset to default value
+
+	if( (u16_regval & BIT0) == BIT0 )		//if nc_en is set
+	{
+		return 0;
+	}
+	#else
+	u16_regval = REG_FCIE(FCIE_REG16h);
+
+	if( (u16_regval & BIT_KERN_CHK_NAND_EMMC) == BIT_KERN_CHK_NAND_EMMC )
+	{
+		if( (u16_regval & BIT_KERN_EMMC) != BIT_KERN_EMMC )
+			return 0;
+	}
+	#endif
+	#endif
 
 	ret = mmc_register_bus();
 	if (ret)

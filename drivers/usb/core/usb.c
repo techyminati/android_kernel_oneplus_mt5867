@@ -46,6 +46,14 @@
 
 #include "hub.h"
 
+#ifndef MP_USB_MSTAR
+#include <mstar/mpatch_macro.h>
+#endif
+
+#if (MP_USB_MSTAR==1)
+#include "../host/ehci-mstar.h"
+#endif
+
 const char *usbcore_name = "usbcore";
 
 static bool nousb;	/* Disable USB when built into kernel image */
@@ -561,6 +569,9 @@ static int usb_dev_uevent(struct device *dev, struct kobj_uevent_env *env)
 }
 
 #ifdef	CONFIG_PM
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+static struct str_waitfor_dev waitfor;
+#endif
 
 /* USB device Power-Management thunks.
  * There's no need to distinguish here between quiescing a USB device
@@ -582,11 +593,21 @@ static void usb_dev_complete(struct device *dev)
 
 static int usb_dev_suspend(struct device *dev)
 {
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+	if (waitfor.stage1_s_wait)
+		wait_for_completion(&(waitfor.stage1_s_wait->power.completion));
+#endif
+
 	return usb_suspend(dev, PMSG_SUSPEND);
 }
 
 static int usb_dev_resume(struct device *dev)
 {
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+	if (waitfor.stage1_r_wait)
+		wait_for_completion(&(waitfor.stage1_r_wait->power.completion));
+#endif
+
 	return usb_resume(dev, PMSG_RESUME);
 }
 
@@ -613,15 +634,19 @@ static int usb_dev_restore(struct device *dev)
 static const struct dev_pm_ops usb_device_pm_ops = {
 	.prepare =	usb_dev_prepare,
 	.complete =	usb_dev_complete,
+#ifndef CONFIG_MP_MSTAR_STR_OF_ORDER
 	.suspend =	usb_dev_suspend,
 	.resume =	usb_dev_resume,
+#endif
 	.freeze =	usb_dev_freeze,
 	.thaw =		usb_dev_thaw,
 	.poweroff =	usb_dev_poweroff,
 	.restore =	usb_dev_restore,
+#if (MP_USB_MSTAR==0)
 	.runtime_suspend =	usb_runtime_suspend,
 	.runtime_resume =	usb_runtime_resume,
 	.runtime_idle =		usb_runtime_idle,
+#endif
 };
 
 #endif	/* CONFIG_PM */
@@ -1167,6 +1192,13 @@ bus_register_failed:
 	usb_acpi_unregister();
 	usb_debugfs_cleanup();
 out:
+#ifdef CONFIG_MP_MSTAR_STR_OF_ORDER
+	//TODO: Not support of_order for policy now...
+	of_mstar_str(usbcore_name, NULL,
+		&usb_device_pm_ops, &waitfor,
+		&usb_dev_suspend, &usb_dev_resume,
+		NULL, NULL);
+#endif
 	return retval;
 }
 

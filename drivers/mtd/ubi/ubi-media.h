@@ -285,7 +285,11 @@ struct ubi_vid_hdr {
 } __packed;
 
 /* Internal UBI volumes count */
+#if defined(CONFIG_MTD_UBI_BACKUP_LSB) && (MP_NAND_UBI == 1)
+#define UBI_INT_VOL_COUNT 2
+#else
 #define UBI_INT_VOL_COUNT 1
+#endif
 
 /*
  * Starting ID of internal volumes: 0x7fffefff.
@@ -301,6 +305,16 @@ struct ubi_vid_hdr {
 #define UBI_LAYOUT_VOLUME_EBS    2
 #define UBI_LAYOUT_VOLUME_NAME   "layout volume"
 #define UBI_LAYOUT_VOLUME_COMPAT UBI_COMPAT_REJECT
+
+#if defined(CONFIG_MTD_UBI_BACKUP_LSB) && (MP_NAND_UBI == 1)
+/* The backup volume contains LSB page backup */
+#define UBI_BACKUP_VOLUME_ID     (UBI_LAYOUT_VOLUME_ID+1)
+#define UBI_BACKUP_VOLUME_TYPE   UBI_VID_DYNAMIC
+#define UBI_BACKUP_VOLUME_ALIGN  1
+#define UBI_BACKUP_VOLUME_EBS    1
+#define UBI_BACKUP_VOLUME_NAME   "backup volume"
+#define UBI_BACKUP_VOLUME_COMPAT 0//UBI_COMPAT_REJECT
+#endif
 
 /* The maximum number of volumes per one UBI device */
 #define UBI_MAX_VOLUMES 128
@@ -365,6 +379,15 @@ struct ubi_vtbl_record {
 	__be32  crc;
 } __packed;
 
+#if defined(CONFIG_MTD_UBI_BACKUP_LSB) && (MP_NAND_UBI == 1)
+struct ubi_backup_lsb_spare {
+	__be16  pnum;
+	__be16  lnum;
+	__be16  sqnum;
+	__be16  page;
+	__be16  vol_id;
+} __packed;
+#endif
 /* UBI fastmap on-flash data structures */
 
 #define UBI_FM_SB_VOLUME_ID	(UBI_LAYOUT_VOLUME_ID + 1)
